@@ -114,35 +114,39 @@ class CondAttribution:
 
     def heatmap_modifier(self, data, on_device=None):
 
-        heatmap = data.grad.detach()
-        heatmap = heatmap.to(on_device) if on_device else heatmap
-        return torch.sum(heatmap, dim=1)
+        heatmap = tuple(d.grad.detach() for d in data)
+        heatmap = tuple(h.to(on_device) if on_device else h for h in heatmap)
+        return heatmap
 
     def broadcast(self, data, conditions) -> Tuple[torch.Tensor, Dict]:
 
-        len_data, len_cond = len(data), len(conditions)
+        len_data, len_cond = len(data[0]), len(conditions)
+        assert all(len(d) == len_data for d in data)
 
         if len_data == len_cond:
-            data.retain_grad()
+            for d in data:
+                d.retain_grad()
             return data, conditions
-
+        
         if len_cond > 1:
-            data = torch.repeat_interleave(data, len_cond, dim=0)
+            data = tuple(torch.repeat_interleave(d, len_cond, dim=0) for d in data)
         if len_data > 1:
             conditions = conditions * len_data
-
-        data.retain_grad()
+            
+        for d in data:
+            d.retain_grad()
         return data, conditions
 
     def _check_arguments(self, data, conditions, start_layer, exclude_parallel, init_rel):
 
-        if not data.requires_grad:
+        if not all(d.requires_grad for d in data):
             raise ValueError(
                 "requires_grad attribute of 'data' must be True.")
 
         if self.overwrite_data_grad:
-            data.grad = None
-        elif data.grad is not None:
+            for d in data:
+                d.grad = None
+        elif any(d.grad is not None for d in data):
             warnings.warn("'data' already has a filled .grad attribute. Set to None if not intended or set 'overwrite_grad' to True.")
 
         distinct_cond = set()
@@ -178,7 +182,7 @@ class CondAttribution:
 
 
     def __call__(
-            self, data: torch.tensor, conditions: List[Dict[str, List]],
+            self, data: Union[torch.tensor, Tuple[torch.tensor]], conditions: List[Dict[str, List]],
             composite: Composite = None, record_layer: List[str] = [],
             mask_map: Union[Callable, Dict[str, Callable]] = ChannelConcept.mask, start_layer: str = None, init_rel=None,
             on_device: str = None, exclude_parallel=True) -> attrResult:
@@ -269,7 +273,7 @@ class CondAttribution:
                 heatmap = attr.heatmap
                 prediction = attr.prediction
             else:
-                heatmap = torch.cat([heatmap, attr.heatmap], dim=0)
+                heatmap = (torch.cat([h1, h2], dim=0) for h1, h2 in zip(heatmap, attr.heatmap))
                 prediction = torch.cat([prediction, attr.prediction], dim=0)
 
         return attrResult(heatmap, activations, relevances, prediction)
@@ -292,7 +296,7 @@ class CondAttribution:
 
 
     def _attribute(
-            self, data: torch.tensor, conditions: List[Dict[str, List]],
+            self, data: Union[torch.tensor, Tuple[torch.tensor]], conditions: List[Dict[str, List]],
             composite: Composite = None, record_layer: List[str] = [],
             mask_map: Union[Callable, Dict[str, Callable]] = ChannelConcept.mask, start_layer: str = None, init_rel=None,
             on_device: str = None, exclude_parallel=True) -> attrResult:
@@ -301,6 +305,9 @@ class CondAttribution:
         exclude_parallel: boolean
             If set, all layer names in 'conditions' must be identical. This limitation does not apply to the __call__ method.
         """
+
+        if not isinstance(data, tuple):
+            data = (data,)
         data, conditions = self.broadcast(data, conditions)
 
         self._check_arguments(data, conditions, start_layer, exclude_parallel, init_rel)
@@ -328,7 +335,7 @@ class CondAttribution:
         with mask_composite.context(self.model), composite.context(self.model) as modified:
 
             if start_layer:
-                _ = modified(data)
+                _ = modified(*data)
                 pred = layer_out[start_layer]
                 grad_mask = self.relevance_init(pred.detach().clone(), None, init_rel)
                 if start_layer in cond_l_names:
@@ -336,7 +343,7 @@ class CondAttribution:
                 self.backward(pred, grad_mask, exclude_parallel, cond_l_names, layer_out)
 
             else:
-                pred = modified(data)
+                pred = modified(*data)
                 grad_mask = self.relevance_init(pred.detach().clone(), y_targets, init_rel)
                 self.backward(pred, grad_mask, exclude_parallel, cond_l_names, layer_out)
 
@@ -349,7 +356,7 @@ class CondAttribution:
         return attrResult(attribution, activations, relevances, pred)
 
     def generate(
-            self, data: torch.tensor, conditions: List[Dict[str, List]],
+            self, data: Union[torch.tensor, Tuple[torch.tensor]], conditions: List[Dict[str, List]],
             composite: Composite = None, record_layer: List[str] = [],
             mask_map: Union[Callable, Dict[str, Callable]] = ChannelConcept.mask, start_layer: str = None, init_rel=None,
             batch_size=10, on_device=None, exclude_parallel=True, verbose=True) -> attrResult:
@@ -366,7 +373,9 @@ class CondAttribution:
         verbose: boolean
             If set, a progressbar is displayed.
         """
-
+        
+        if not isinstance(data, tuple):
+            data = (data, )
         self._check_arguments(data, conditions, start_layer, exclude_parallel, init_rel)
 
         # register on all layers in layer_map an empty hook
@@ -393,21 +402,22 @@ class CondAttribution:
             batches = 1
             batch_size = cond_length
 
-        data_batch = torch.repeat_interleave(data, batch_size, dim=0)
-        data_batch.grad = None
-        data_batch.retain_grad()
+        data_batched = tuple(torch.repeat_interleave(d, batch_size, dim=0) for d in data)
+        for b in data_batched:
+            b.grad = None
+            b.retain_grad()
         retain_graph = True
 
         with mask_composite.context(self.model), composite.context(self.model) as modified:
 
             if start_layer:
-                _ = modified(data_batch)
+                _ = modified(*data_batched)
                 pred = layer_out[start_layer]
                 if start_layer in cond_l_names:
                     cond_l_names.remove(start_layer)
 
             else:
-                pred = modified(data_batch)
+                pred = modified(*data_batched)
 
             if verbose:
                 pbar = tqdm(total=batches, dynamic_ncols=True)
@@ -438,15 +448,15 @@ class CondAttribution:
                 grad_mask = self.relevance_init(pred.detach().clone(), y_targets, init_rel)
                 self.backward(pred, grad_mask, exclude_parallel, cond_l_names, layer_out, retain_graph)
 
-                heatmap = self.heatmap_modifier(data_batch)
+                heatmap = self.heatmap_modifier(data_batched)
                 activations, relevances = {}, {}
                 if len(layer_out) > 0:
                     activations, relevances = self._collect_hook_activation_relevance(
                         layer_out, on_device, batch_size)
 
-                yield attrResult(heatmap[:batch_size], activations, relevances, pred[:batch_size])
+                yield attrResult(tuple(h[:batch_size] for h in heatmap), activations, relevances, pred[:batch_size])
 
-                self._reset_gradients(data_batch)
+                self._reset_gradients(data_batched)
                 [hook.fn_list.clear() for hook in hook_map.values()]
 
         [h.remove() for h in handles]
@@ -539,7 +549,8 @@ class CondAttribution:
         for p in self.model.parameters():
             p.grad = None
 
-        data.grad = None
+        for d in data:
+            d.grad = None
 
 
 class AttributionGraph:
