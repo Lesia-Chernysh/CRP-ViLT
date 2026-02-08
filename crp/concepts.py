@@ -144,3 +144,75 @@ class ChannelConcept(Concept):
         rf_ch_sorted = torch.gather(rf_neuron, 0, d_ch_sorted)
 
         return d_ch_sorted, rel_ch_sorted, rf_ch_sorted
+
+class TransformerChannelConcept(Concept):
+    """
+    Concept Class for torch.nn.Linear transformer layers
+    """
+
+    @staticmethod
+    def mask(batch_id: int, concept_ids: List, layer_name=None):
+        """
+        Wrapper that generates a function that modifies the gradient (replaced by zennit by attributions).
+
+        Parameters:
+        ----------
+        batch_id: int
+            Specifies the batch dimension in the torch.Tensor.
+        concept_ids: list of integer values
+            integer lists corresponding to neuron indices.
+
+        Returns:
+        --------
+        callable function that modifies the gradient
+        """
+
+        def mask_fct(grad):
+            # grad in transformer is [batch, tokens, embedding/channel], a channel is across tokens
+            mask = torch.zeros_like(grad[batch_id])
+            mask[..., concept_ids] = 1
+            grad[batch_id] = grad[batch_id] * mask
+
+            return grad
+
+        return mask_fct
+
+    def attribute(self, relevance, mask=None, layer_name: str = None, abs_norm=True):
+
+        if isinstance(mask, torch.Tensor):
+            relevance = relevance * mask
+
+        rel_l = relevance.sum(dim=-2)
+
+        if abs_norm:
+            rel_l = rel_l / (rel_l.sum(-1).view(-1, 1) + 1e-10)
+
+        return rel_l
+
+    def reference_sampling(self, relevance, layer_name: str = None, max_target: str = "sum", abs_norm=True):
+        """
+        Parameters:
+            max_target: str. Either 'sum' or 'max'.
+        """
+
+        # position of receptive field neuron
+        rf_neuron = torch.argmax(relevance, dim=-1)
+
+        # channel maximization target
+        if max_target == "sum":
+            rel_l = torch.sum(relevance, dim=-1)
+
+        elif max_target == "max":
+            rel_l = torch.gather(relevance, -1, rf_neuron.unsqueeze(-1)).squeeze(-1)
+
+        else:
+            raise ValueError("'max_target' supports only 'max' or 'sum'.")
+
+        if abs_norm:
+            rel_l = rel_l / (torch.abs(rel_l).sum(-1).view(-1, 1) + 1e-10)
+        
+        d_ch_sorted = torch.argsort(rel_l, dim=0, descending=True)
+        rel_ch_sorted = torch.gather(rel_l, 0, d_ch_sorted)
+        rf_ch_sorted = torch.gather(rf_neuron, 0, d_ch_sorted)
+
+        return d_ch_sorted, rel_ch_sorted, rf_ch_sorted
