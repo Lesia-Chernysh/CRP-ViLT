@@ -17,7 +17,7 @@ attrGraphResult = namedtuple("AttributionGraphResults", "nodes, connections")
 
 class CondAttribution:
 
-    def __init__(self, model: torch.nn.Module, device: torch.device = None, overwrite_data_grad=True, no_param_grad=True) -> None:
+    def __init__(self, model: torch.nn.Module, device: torch.device = None, overwrite_input_grad=True, no_param_grad=True) -> None:
         """
         This class contains the functionality to compute conditional attributions.
 
@@ -26,8 +26,8 @@ class CondAttribution:
         model: torch.nn.Module
         device: torch.device
             specifies where the model and subsequent computation takes place.
-        overwrite_data_grad: boolean
-            If True, the .grad attribute of the 'data' argument is set to None before each __call__.
+        overwrite_input_grad: boolean
+            If True, the .grad attribute of the 'inputs' argument is set to None before each __call__.
         no_param_grad: boolean
             If True, sets the requires_grad attribute of all model parameters to zero, to reduce the GPU memory footprint.
         """
@@ -36,7 +36,7 @@ class CondAttribution:
 
         self.device = next(model.parameters()).device if device is None else device
         self.model = model
-        self.overwrite_data_grad = overwrite_data_grad
+        self.overwrite_input_grad = overwrite_input_grad
 
         if no_param_grad:
             self.model.requires_grad_(False)
@@ -112,42 +112,43 @@ class CondAttribution:
 
         return output_selection
 
-    def heatmap_modifier(self, data, on_device=None):
+    def heatmap_modifier(self, inputs, on_device=None):
 
-        heatmap = tuple(d.grad.detach() for d in data)
+        heatmap = tuple(i.grad.detach() for i in inputs)
         heatmap = tuple(h.to(on_device) if on_device else h for h in heatmap)
         return heatmap
 
-    def broadcast(self, data, conditions) -> Tuple[torch.Tensor, Dict]:
+    def broadcast(self, inputs, conditions, additional_forward_kwargs) -> Tuple[torch.Tensor, Dict]:
 
-        len_data, len_cond = len(data[0]), len(conditions)
-        assert all(len(d) == len_data for d in data)
+        len_inputs, len_cond = len(inputs[0]), len(conditions)
+        assert all(len(i) == len_inputs for i in inputs)
 
-        if len_data == len_cond:
-            for d in data:
-                d.retain_grad()
-            return data, conditions
+        if len_inputs == len_cond:
+            for i in inputs:
+                i.retain_grad()
+            return inputs, conditions, additional_forward_kwargs
         
         if len_cond > 1:
-            data = tuple(torch.repeat_interleave(d, len_cond, dim=0) for d in data)
-        if len_data > 1:
-            conditions = conditions * len_data
+            inputs = tuple(torch.repeat_interleave(i, len_cond, dim=0) for i in inputs)
+            additional_forward_kwargs = {key:torch.repeat_interleave(val, len_cond, dim=0) for key, val in additional_forward_kwargs}
+        if len_inputs > 1:
+            conditions = conditions * len_inputs
             
-        for d in data:
-            d.retain_grad()
-        return data, conditions
+        for i in inputs:
+            i.retain_grad()
+        return inputs, conditions, additional_forward_kwargs
 
-    def _check_arguments(self, data, conditions, start_layer, exclude_parallel, init_rel):
+    def _check_arguments(self, inputs, conditions, start_layer, exclude_parallel, init_rel):
 
-        if not all(d.requires_grad for d in data):
+        if not all(i.requires_grad for i in inputs):
             raise ValueError(
-                "requires_grad attribute of 'data' must be True.")
+                "requires_grad attribute of 'inputs' must be True.")
 
-        if self.overwrite_data_grad:
-            for d in data:
-                d.grad = None
-        elif any(d.grad is not None for d in data):
-            warnings.warn("'data' already has a filled .grad attribute. Set to None if not intended or set 'overwrite_grad' to True.")
+        if self.overwrite_input_grad:
+            for i in inputs:
+                i.grad = None
+        elif any(i.grad is not None for i in inputs):
+            warnings.warn("'inputs' already has a filled .grad attribute. Set to None if not intended or set 'overwrite_grad' to True.")
 
         distinct_cond = set()
         for cond in conditions:
@@ -182,10 +183,10 @@ class CondAttribution:
 
 
     def __call__(
-            self, data: Union[torch.tensor, Tuple[torch.tensor]], conditions: List[Dict[str, List]],
+            self, inputs: Union[torch.Tensor, Tuple[torch.Tensor]], conditions: List[Dict[str, List]],
             composite: Composite = None, record_layer: List[str] = [],
             mask_map: Union[Callable, Dict[str, Callable]] = ChannelConcept.mask, start_layer: str = None, init_rel=None,
-            on_device: str = None, exclude_parallel=True) -> attrResult:
+            on_device: str = None, exclude_parallel=True, additional_forward_kwargs: Dict[str, torch.Tensor] = {}) -> attrResult:
 
         """
         Computes conditional attributions by masking the gradient flow of PyTorch (that is replaced by zennit with relevance values).
@@ -199,8 +200,8 @@ class CondAttribution:
         Parameters:
         -----------
 
-        data: torch.Tensor
-            Input sample for which a conditional heatmap is computed
+        inputs: torch.Tensor or tuple of torch.Tensor
+            Input samples for which a conditional heatmap is computed
         conditions: list of dict
             The key of a dict are string layer names and their value is a list of integers describing the concept (channel, neuron) index.
             In general, the values are passed to the 'mask_map' function as 'concept_ids' argument.
@@ -223,6 +224,8 @@ class CondAttribution:
         exclude_parallel: boolean
             If set, the PyTorch gradient flow is restricted so that it does not enter into parallel layers (shortcut connections) 
             of the layers mentioned in the 'conditions' dictionary. Useful to get the sole contribution of a specific concept.
+        additional_forward_kwargs: dict of torch.Tensor
+            Additional keyword inputs to be passed to the model without computing relevance on them.
 
         Returns:
         --------
@@ -230,7 +233,7 @@ class CondAttribution:
         attrResult: namedtuple object
             Contains the attributes 'heatmap', 'activations', 'relevances' and 'prediction'.
             'heatmap': torch.Tensor
-                Output of the self.attribution_modifier method that defines how 'data'.grad is processed.
+                Output of the self.attribution_modifier method that defines how 'inputs'.grad is processed.
             'activations': dict of str and torch.Tensor
                 The keys are the layer names and values are the activations
             'relevances': dict of str and torch.Tensor
@@ -240,9 +243,9 @@ class CondAttribution:
         """
         
         if exclude_parallel:
-            return self._conditions_wrapper(data, conditions, composite, record_layer, mask_map, start_layer, init_rel, on_device, True)
+            return self._conditions_wrapper(inputs, conditions, composite, record_layer, mask_map, start_layer, init_rel, on_device, True, additional_forward_kwargs)
         else:
-            return self._attribute(data, conditions, composite, record_layer, mask_map, start_layer, init_rel, on_device, False)
+            return self._attribute(inputs, conditions, composite, record_layer, mask_map, start_layer, init_rel, on_device, False, additional_forward_kwargs)
 
     def _conditions_wrapper(self, *args):
         """
@@ -250,7 +253,7 @@ class CondAttribution:
         the list is divided into distinct lists that all contain the same layer name.
         """
 
-        data, conditions = args[:2]
+        inputs, conditions = args[:2]
 
         relevances, activations = {}, {}
         heatmap, prediction = None, None
@@ -259,7 +262,7 @@ class CondAttribution:
 
         for dist_layer in dist_conds:
 
-            attr = self._attribute(data, dist_conds[dist_layer], *args[2:])
+            attr = self._attribute(inputs, dist_conds[dist_layer], *args[2:])
 
             for l_name in attr.relevances:
                 if l_name not in relevances:
@@ -296,21 +299,21 @@ class CondAttribution:
 
 
     def _attribute(
-            self, data: Union[torch.tensor, Tuple[torch.tensor]], conditions: List[Dict[str, List]],
+            self, inputs: Union[torch.Tensor, Tuple[torch.Tensor]], conditions: List[Dict[str, List]],
             composite: Composite = None, record_layer: List[str] = [],
             mask_map: Union[Callable, Dict[str, Callable]] = ChannelConcept.mask, start_layer: str = None, init_rel=None,
-            on_device: str = None, exclude_parallel=True) -> attrResult:
+            on_device: str = None, exclude_parallel=True, additional_forward_kwargs: Dict[str, torch.Tensor] = {}) -> attrResult:
         """
         Computes the actual attributions as described in __call__ method docstring.
         exclude_parallel: boolean
             If set, all layer names in 'conditions' must be identical. This limitation does not apply to the __call__ method.
         """
 
-        if not isinstance(data, tuple):
-            data = (data,)
-        data, conditions = self.broadcast(data, conditions)
+        if not isinstance(inputs, tuple):
+            inputs = (inputs,)
+        inputs, conditions, additional_forward_kwargs = self.broadcast(inputs, conditions, additional_forward_kwargs)
 
-        self._check_arguments(data, conditions, start_layer, exclude_parallel, init_rel)
+        self._check_arguments(inputs, conditions, start_layer, exclude_parallel, init_rel)
 
         hook_map, y_targets, cond_l_names = {}, [], []
         for i, cond in enumerate(conditions):
@@ -335,7 +338,7 @@ class CondAttribution:
         with mask_composite.context(self.model), composite.context(self.model) as modified:
 
             if start_layer:
-                _ = modified(*data)
+                _ = modified(*inputs, **additional_forward_kwargs)
                 pred = layer_out[start_layer]
                 grad_mask = self.relevance_init(pred.detach().clone(), None, init_rel)
                 if start_layer in cond_l_names:
@@ -343,11 +346,11 @@ class CondAttribution:
                 self.backward(pred, grad_mask, exclude_parallel, cond_l_names, layer_out)
 
             else:
-                pred = modified(*data)
+                pred = modified(*inputs, **additional_forward_kwargs)
                 grad_mask = self.relevance_init(pred.detach().clone(), y_targets, init_rel)
                 self.backward(pred, grad_mask, exclude_parallel, cond_l_names, layer_out)
 
-            attribution = self.heatmap_modifier(data, on_device)
+            attribution = self.heatmap_modifier(inputs, on_device)
             activations, relevances = {}, {}
             if len(layer_out) > 0:
                 activations, relevances = self._collect_hook_activation_relevance(layer_out, on_device)
@@ -356,12 +359,12 @@ class CondAttribution:
         return attrResult(attribution, activations, relevances, pred)
 
     def generate(
-            self, data: Union[torch.tensor, Tuple[torch.tensor]], conditions: List[Dict[str, List]],
+            self, inputs: Union[torch.Tensor, Tuple[torch.Tensor]], conditions: List[Dict[str, List]],
             composite: Composite = None, record_layer: List[str] = [],
             mask_map: Union[Callable, Dict[str, Callable]] = ChannelConcept.mask, start_layer: str = None, init_rel=None,
-            batch_size=10, on_device=None, exclude_parallel=True, verbose=True) -> attrResult:
+            batch_size=10, on_device=None, exclude_parallel=True, verbose=True, additional_forward_kwargs: Dict[str, torch.Tensor] = {}) -> attrResult:
         """
-        Computes several conditional attributions for single data point by broadcasting 'data' to length 'batch_size' and
+        Computes several conditional attributions for single data point by broadcasting 'inputs' to length 'batch_size' and
         iterating through the 'conditions' list with stepsize 'batch_size'. The model forward pass is performed only once and 
         the backward graph kept in memory in order to double the performance.
         Please refer to the docstring of the __call__ method.
@@ -374,9 +377,9 @@ class CondAttribution:
             If set, a progressbar is displayed.
         """
         
-        if not isinstance(data, tuple):
-            data = (data, )
-        self._check_arguments(data, conditions, start_layer, exclude_parallel, init_rel)
+        if not isinstance(inputs, tuple):
+            inputs = (inputs, )
+        self._check_arguments(inputs, conditions, start_layer, exclude_parallel, init_rel)
 
         # register on all layers in layer_map an empty hook
         hook_map, cond_l_names = {}, []
@@ -402,8 +405,9 @@ class CondAttribution:
             batches = 1
             batch_size = cond_length
 
-        data_batched = tuple(torch.repeat_interleave(d, batch_size, dim=0) for d in data)
-        for b in data_batched:
+        inputs_batched = tuple(torch.repeat_interleave(i, batch_size, dim=0) for i in inputs)
+        additional_forward_kwargs = {key:torch.repeat_interleave(val, len_cond, dim=0) for key, val in additional_forward_kwargs}
+        for b in inputs_batched:
             b.grad = None
             b.retain_grad()
         retain_graph = True
@@ -411,13 +415,13 @@ class CondAttribution:
         with mask_composite.context(self.model), composite.context(self.model) as modified:
 
             if start_layer:
-                _ = modified(*data_batched)
+                _ = modified(*inputs_batched, **additional_forward_kwargs)
                 pred = layer_out[start_layer]
                 if start_layer in cond_l_names:
                     cond_l_names.remove(start_layer)
 
             else:
-                pred = modified(*data_batched)
+                pred = modified(*inputs_batched, **additional_forward_kwargs)
 
             if verbose:
                 pbar = tqdm(total=batches, dynamic_ncols=True)
@@ -448,7 +452,7 @@ class CondAttribution:
                 grad_mask = self.relevance_init(pred.detach().clone(), y_targets, init_rel)
                 self.backward(pred, grad_mask, exclude_parallel, cond_l_names, layer_out, retain_graph)
 
-                heatmap = self.heatmap_modifier(data_batched)
+                heatmap = self.heatmap_modifier(inputs_batched)
                 activations, relevances = {}, {}
                 if len(layer_out) > 0:
                     activations, relevances = self._collect_hook_activation_relevance(
@@ -456,7 +460,7 @@ class CondAttribution:
 
                 yield attrResult(tuple(h[:batch_size] for h in heatmap), activations, relevances, pred[:batch_size])
 
-                self._reset_gradients(data_batched)
+                self._reset_gradients(inputs_batched)
                 [hook.fn_list.clear() for hook in hook_map.values()]
 
         [h.remove() for h in handles]
@@ -541,7 +545,7 @@ class CondAttribution:
 
         return activations, relevances
 
-    def _reset_gradients(self, data):
+    def _reset_gradients(self, inputs):
         """
         custom zero_grad() function
         """
@@ -549,8 +553,8 @@ class CondAttribution:
         for p in self.model.parameters():
             p.grad = None
 
-        for d in data:
-            d.grad = None
+        for i in inputs:
+            i.grad = None
 
 
 class AttributionGraph:
