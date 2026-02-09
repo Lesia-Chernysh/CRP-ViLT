@@ -70,17 +70,17 @@ class FeatureVisualization:
 
         raise NotImplementedError
 
-    def run(self, composite: Composite, data_start, data_end, batch_size=32, checkpoint=500, on_device=None):
+    def run(self, data_start, data_end, composite: Composite = None, batch_size=32, checkpoint=500, on_device=None):
 
         print("Running Analysis...")
-        saved_checkpoints = self.run_distributed(composite, data_start, data_end, batch_size, checkpoint, on_device)
+        saved_checkpoints = self.run_distributed(data_start, data_end, composite, batch_size, checkpoint, on_device)
 
         print("Collecting results...")
         saved_files = self.collect_results(saved_checkpoints)
 
         return saved_files
 
-    def run_distributed(self, composite: Composite, data_start, data_end, batch_size=16, checkpoint=500, on_device=None):
+    def run_distributed(self, data_start, data_end, composite: Composite = None, batch_size=16, checkpoint=500, on_device=None):
         """
         max batch_size = max(multi_targets) * data_batch
         data_end: exclusively counted
