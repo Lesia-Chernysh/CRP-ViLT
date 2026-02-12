@@ -6,12 +6,13 @@ import math
 from collections.abc import Iterable
 import concurrent.futures
 import functools
+import itertools
 import inspect
 from tqdm import tqdm
 from zennit.composites import NameMapComposite, Composite
 from crp.attribution import CondAttribution
 from crp.maximization import Maximization
-from crp.concepts import ChannelConcept, Concept
+from crp.concepts import TransformerChannelConcept, Concept
 from crp.statistics import Statistics
 from crp.hooks import FeatVisHook
 from crp.helper import load_maximization, load_statistics, load_stat_targets
@@ -19,15 +20,15 @@ from crp.image import vis_img_heatmap, vis_opaque_img
 from crp.cache import Cache
 
 
-class FeatureVisualization:
+class ViLTFeatureVisualization:
 
     def __init__(
-            self, attribution: CondAttribution, dataset, layer_map: Dict[str, Concept], preprocess_fn: Callable=None,
+            self, attribution: CondAttribution, dataset, layer_map: Dict[str, Concept], processor=None,
             max_target="sum", abs_norm=True, path="FeatureVisualization", device=None, cache: Cache=None):
 
         self.dataset = dataset
         self.layer_map = layer_map
-        self.preprocess_fn = preprocess_fn
+        self.processor = processor
 
         self.attribution = attribution
 
@@ -41,35 +42,7 @@ class FeatureVisualization:
 
         self.Cache = cache
 
-    def preprocess_data(self, data):
-
-        if callable(self.preprocess_fn):
-            return self.preprocess_fn(data)
-        else:
-            return data
-
-    def get_data_sample(self, index, preprocessing=True) -> Tuple[torch.Tensor, int]:
-        """
-        returns a data sample from dataset at index.
-
-        Parameter:
-            index: integer
-            preprocessing: boolean.
-                If True, return the sample after preprocessing. If False, return the sample for plotting.
-        """
-
-        data, target = self.dataset[index]
-        data = data.to(self.device).unsqueeze(0)
-        if preprocessing:
-            data = self.preprocess_data(data)
-        
-        data.requires_grad = True
-        return data, target
-
-    def multitarget_to_single(self, multi_target):
-
-        raise NotImplementedError
-
+    
     def run(self, data_start, data_end, composite: Composite = None, batch_size=32, checkpoint=500, on_device=None):
 
         print("Running Analysis...")
@@ -80,7 +53,8 @@ class FeatureVisualization:
 
         return saved_files
 
-    def run_distributed(self, data_start, data_end, composite: Composite = None, batch_size=16, checkpoint=500, on_device=None):
+    
+    def run_distributed(self, data_start, data_end, composite: Composite = None, batch_size=32, checkpoint=500, on_device=None):
         """
         max batch_size = max(multi_targets) * data_batch
         data_end: exclusively counted
@@ -109,50 +83,37 @@ class FeatureVisualization:
             composite.register(self.attribution.model)
         fv_composite.register(self.attribution.model)
 
-        pbar = tqdm(total=batches, dynamic_ncols=True)
+        pbar = tqdm(total=batches, dynamic_ncols=True)            
 
         for b in range(batches):
 
             pbar.update(1)
 
-            samples_batch = samples[b * batch_size: (b + 1) * batch_size]
-            data_batch, targets_samples = self.get_data_concurrently(samples_batch, preprocessing=True)
+            sample_indices = samples[b * batch_size: (b + 1) * batch_size]
+            inputs, multi_targets = self.get_data_concurrently(sample_indices)
 
-            targets_samples = np.atleast_1d(targets_samples) # numpy operation needed
-
-            # convert multi target to single target if user defined the method
-            data_broadcast, targets, sample_indices = [], [], []
-            try:
-                for i_t, target in enumerate(targets_samples):
-                    single_targets = self.multitarget_to_single(target)
-                    for st in single_targets:
-                        targets.append(st)
-                        data_broadcast.append(data_batch[i_t])
-                        sample_indices.append(samples_batch[i_t])
-                if len(data_broadcast) == 0:
-                    continue
-                # TODO: test stack
-                data_broadcast = torch.stack(data_broadcast, dim=0)
-                sample_indices = np.array(sample_indices)
-                targets = np.array(targets)
-
-            except NotImplementedError:
-                data_broadcast, targets, sample_indices = data_batch, targets_samples, samples_batch
-
+            # handle multiple targets (vqa has multiple answers per question)
+            target_counts = list(map(len, multi_targets))
+            targets = np.array(list(itertools.chain(*multi_targets))) # flatten 2d list
+            # copy data for every target in target list 
+            for key, input_batch in inputs.items():
+                inputs[key] = input_batch.repeat_interleave(torch.tensor(target_counts).cuda(), dim=0)
+            sample_indices = np.array(sample_indices).repeat(target_counts, axis=0)
+            
             conditions = [{self.attribution.MODEL_OUTPUT_NAME: [t]} for t in targets]
             # dict_inputs is linked to FeatHooks
             dict_inputs["sample_indices"] = sample_indices
             dict_inputs["targets"] = targets
 
             # composites are already registered before
-            self.attribution(data_broadcast, conditions, None, exclude_parallel=False)
+            self.attribution((inputs.pixel_values, inputs.input_embeds), conditions, None, exclude_parallel=False, additional_forward_kwargs={"token_type_ids":inputs.token_type_ids, "attention_mask":inputs.attention_mask, "pixel_mask":inputs.pixel_mask})
 
             if b % checkpoint == checkpoint - 1:
-                self._save_results((last_checkpoint, sample_indices[-1] + 1))
-                last_checkpoint = sample_indices[-1] + 1
+                self._save_results((last_checkpoint, b + 1))
+                last_checkpoint = b + 1
 
         # TODO: what happens if result arrays are empty?
-        self._save_results((last_checkpoint, sample_indices[-1] + 1))
+        self._save_results((last_checkpoint, b + 1))
 
         if composite:
             composite.remove()
@@ -162,6 +123,21 @@ class FeatureVisualization:
 
         return self.saved_checkpoints
 
+
+    def get_data_concurrently(self, indices: Union[List, np.ndarray, torch.tensor]):
+        
+        images, questions, answers = zip(*[self.dataset[i] for i in indices])
+        
+        inputs = self.processor(images=images, text=questions, return_tensors="pt", padding=True, truncation=True)
+        targets = [[self.attribution.model.hf_model.config.label2id[label] for label in labels if label in self.attribution.model.hf_model.config.label2id] for labels in answers]
+    
+        inputs.to(self.attribution.model.hf_model.device)
+        inputs["input_embeds"] = self.attribution.model.hf_model.get_input_embeddings()(inputs.input_ids).detach().requires_grad_(True)
+        inputs.pixel_values.requires_grad_(True)
+
+        return inputs, targets
+
+        
     @torch.no_grad()
     def analyze_relevance(self, rel, layer_name, concept, data_indices, targets):
         """
@@ -172,6 +148,7 @@ class FeatureVisualization:
 
         self.RelStats.analyze_layer(d_c_sorted, rel_c_sorted, rf_c_sorted, t_c_sorted, layer_name)
 
+    
     @torch.no_grad()
     def analyze_activation(self, act, layer_name, concept, data_indices, targets):
         """
@@ -180,6 +157,7 @@ class FeatureVisualization:
 
         # activation analysis once per sample if multi target dataset
         unique_indices = np.unique(data_indices, return_index=True)[1]
+        
         data_indices = data_indices[unique_indices]
         act = act[unique_indices]
         targets = targets[unique_indices]
@@ -189,6 +167,7 @@ class FeatureVisualization:
 
         self.ActStats.analyze_layer(d_c_sorted, act_c_sorted, rf_c_sorted, t_c_sorted, layer_name)
 
+    
     def _save_results(self, d_index=None):
 
         self.saved_checkpoints["r_max"].extend(self.RelMax._save_results(d_index))
@@ -196,6 +175,7 @@ class FeatureVisualization:
         self.saved_checkpoints["r_stats"].extend(self.RelStats._save_results(d_index))
         self.saved_checkpoints["a_stats"].extend(self.ActStats._save_results(d_index))
 
+    
     def collect_results(self, checkpoints: Dict[str, List[str]], d_index: Tuple[int, int] = None):
 
         saved_files = {}
@@ -206,30 +186,7 @@ class FeatureVisualization:
         saved_files["a_stats"] = self.ActStats.collect_results(checkpoints["a_stats"], d_index)
 
         return saved_files
-
-    def get_data_concurrently(self, indices: Union[List, np.ndarray, torch.tensor], preprocessing=False):
-
-        if len(indices) == 1:
-            data, label = self.get_data_sample(indices[0], preprocessing)
-            return data, label
-
-        threads = []
-        data_returned = []
-        labels_returned = []
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            for index in indices:
-                future = executor.submit(self.get_data_sample, index, preprocessing)
-                threads.append(future)
-
-        for t in threads:
-            single_data = t.result()[0]
-            single_label = t.result()[1]
-            data_returned.append(single_data)
-            labels_returned.append(single_label)
-
-        data_returned = torch.cat(data_returned, dim=0)
-        return data_returned, labels_returned
-
+        
 
     def cache_reference(func):
         """
@@ -291,11 +248,11 @@ class FeatureVisualization:
 
     @cache_reference
     def get_max_reference(
-            self, concept_ids: Union[int,list], layer_name: str, mode="relevance", r_range: Tuple[int, int] = (0, 8), composite: Composite=None,
+            self, concept_ids: Union[int,list], layer_name: str, mode="relevance", r_range: Tuple[int, int] = (0, 8), attribute=False,
             rf=False, plot_fn=vis_img_heatmap, batch_size=32)-> Dict:
         """
-        Retreive reference samples for a list of concepts in a layer. Relevance and Activation Maximization
-        are availble if FeatureVisualization was computed for the mode. In addition, conditional heatmaps can be computed on reference samples.
+        Retrieve reference samples for a list of concepts in a layer. Relevance and Activation Maximization
+        are available if FeatureVisualization was computed for the mode. In addition, conditional heatmaps can be computed on reference samples.
         If the crp.concept class (supplied to the FeatureVisualization layer_map) implements masking for a single neuron in the 'mask_rf' method, 
         the reference samples and heatmaps can be cropped using the receptive field of the most relevant or active neuron.
 
@@ -338,21 +295,21 @@ class FeatureVisualization:
         else:
             raise ValueError("`mode` must be `relevance` or `activation`")
 
-        if rf and not composite:
-            warnings.warn("The receptive field is only computed, if you fill the 'composite' argument with a zennit Composite.")
+        if rf and not attribute:
+            warnings.warn("The receptive field is only computed, if you set `attribute`.")
 
         for c_id in concept_ids:
 
             d_indices = d_c_sorted[r_range[0]:r_range[1], c_id]
             n_indices = rf_c_sorted[r_range[0]:r_range[1], c_id]
 
-            ref_c[c_id] = self._load_ref_and_attribution(d_indices, c_id, n_indices, layer_name, composite, rf, plot_fn, batch_size)
+            ref_c[c_id] = self._load_ref_and_attribution(d_indices, c_id, n_indices, layer_name, attribute, rf, plot_fn, batch_size)
 
         return ref_c
 
     @cache_reference
     def get_stats_reference(self, concept_id: int, layer_name: str, targets: Union[int, list], mode="relevance", r_range: Tuple[int, int] = (0, 8),
-            composite=None, rf=False, plot_fn=vis_img_heatmap, batch_size=32):
+            attribute=True, rf=False, plot_fn=vis_img_heatmap, batch_size=32):
         """
         Retreive reference samples for a single concept in a layer wrt. different explanation targets i.e. returns the reference samples
         that are computed by self.compute_stats. Relevance and Activation are availble if FeatureVisualization was computed for the statitics mode. 
@@ -369,8 +326,8 @@ class FeatureVisualization:
         r_range: Tuple(int, int)
             Range of N-top reference samples. For example, (3, 7) corresponds to the Top-3 to -6 samples.
             Argument must be a closed set i.e. second element of tuple > first element.
-        composite: zennit.composites or None
-            If set, compute conditional heatmaps on reference samples. `composite` is used for the CondAttribution object.
+        attribute: boolean
+            If set, compute conditional heatmaps on reference samples.
         rf: boolean
             If True, compute the CRP heatmap for the most relevant/most activating neuron only to restrict the conditonal heatmap
             on the receptive field.
@@ -400,8 +357,8 @@ class FeatureVisualization:
         else:
             raise ValueError("`mode` must be `relevance` or `activation`")
         
-        if rf and not composite:
-            warnings.warn("The receptive field is only computed, if you fill the 'composite' argument with a zennit Composite.")
+        if rf and not attribute:
+            warnings.warn("The receptive field is only computed, if you set `attribute`.")
 
         for t in targets:
             
@@ -409,29 +366,28 @@ class FeatureVisualization:
             d_indices = d_c_sorted[r_range[0]:r_range[1], concept_id]
             n_indices = rf_c_sorted[r_range[0]:r_range[1], concept_id]
 
-            ref_t[f"{concept_id}:{t}"] = self._load_ref_and_attribution(d_indices, concept_id, n_indices, layer_name, composite, rf, plot_fn, batch_size)
+            ref_t[f"{concept_id}:{t}"] = self._load_ref_and_attribution(d_indices, concept_id, n_indices, layer_name, attribute, rf, plot_fn, batch_size)
 
         return ref_t
 
-    def _load_ref_and_attribution(self, d_indices, c_id, n_indices, layer_name, composite, rf, plot_fn, batch_size):
+    def _load_ref_and_attribution(self, d_indices, c_id, n_indices, layer_name, attribute, rf, plot_fn, batch_size):
 
-        data_batch, _ = self.get_data_concurrently(d_indices, preprocessing=False)
+        inputs, _ = self.get_data_concurrently(d_indices)
 
-        if composite:
-            data_p = self.preprocess_data(data_batch)
-            heatmaps = self._attribution_on_reference(data_p, c_id, layer_name, composite, rf, n_indices, batch_size)
+        if attribute:
+            heatmaps = self._attribution_on_reference(inputs, c_id, layer_name, None, rf, n_indices, batch_size)
 
             if callable(plot_fn):
-                return plot_fn(data_batch.detach(), heatmaps.detach(), rf)
+                return plot_fn(inputs, heatmaps, rf)
             else:
-                return data_batch.detach().cpu(), heatmaps.detach().cpu()
+                return inputs, heatmaps
 
         else:
-            return data_batch.detach().cpu()
+            return inputs
 
-    def _attribution_on_reference(self, data, concept_id: int, layer_name: str, composite, rf=False, neuron_ids: list=[], batch_size=32):
+    def _attribution_on_reference(self, inputs, concept_id: int, layer_name: str, composite, rf=False, neuron_ids: list=[], batch_size=32):
 
-        n_samples = len(data)
+        n_samples = len(inputs.input_ids)
         if n_samples > batch_size:
             batches = math.ceil(n_samples / batch_size)
         else:
@@ -439,25 +395,26 @@ class FeatureVisualization:
             batch_size = n_samples
 
         if rf and (len(neuron_ids) != n_samples):
-            raise ValueError("length of 'neuron_ids' must be equal to the length of 'data'")
+            raise ValueError("length of 'neuron_ids' must be equal to the length of 'inputs'")
 
         heatmaps = []
         for b in range(batches):
-            data_batch = data[b * batch_size: (b + 1) * batch_size].detach().requires_grad_()
+            for key, input_batch in inputs.items():
+                inputs[key] = input_batch[b * batch_size: (b + 1) * batch_size]
             
             if rf:
                 batch_neuron_ids = neuron_ids[b * batch_size: (b + 1) * batch_size]
                 conditions = [{layer_name: {concept_id: n_index}} for n_index in batch_neuron_ids]
-                attr = self.attribution(data_batch, conditions, composite, mask_map=ChannelConcept.mask_rf, start_layer=layer_name, on_device=self.device, 
-                    exclude_parallel=False)
+                attr = self.attribution((inputs.pixel_values, inputs.input_embeds), conditions, composite, mask_map=TransformerChannelConcept.mask_rf, start_layer=layer_name, on_device=self.device, 
+                    exclude_parallel=False, additional_forward_kwargs={"token_type_ids":inputs.token_type_ids, "attention_mask":inputs.attention_mask, "pixel_mask":inputs.pixel_mask})
             else:
                 conditions = [{layer_name: [concept_id]}] 
                 # initialize relevance with activation before non-linearity (could be changed in a future release)
-                attr = self.attribution(data_batch, conditions, composite, start_layer=layer_name, on_device=self.device, exclude_parallel=False)
+                attr = self.attribution((inputs.pixel_values, inputs.input_embeds), conditions, composite, start_layer=layer_name, on_device=self.device, exclude_parallel=False, additional_forward_kwargs={"token_type_ids":inputs.token_type_ids, "attention_mask":inputs.attention_mask, "pixel_mask":inputs.pixel_mask})
 
             heatmaps.append(attr.heatmap)
 
-        return torch.cat(heatmaps, dim=0)
+        return heatmaps
 
     def compute_stats(self, concept_id, layer_name: str, mode="relevance", top_N=5, mean_N=10, norm=False) -> Tuple[list, list]:
         """

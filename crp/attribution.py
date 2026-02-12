@@ -1,7 +1,7 @@
 from zennit.composites import NameMapComposite
 from zennit.core import Composite
 from crp.hooks import MaskHook
-from crp.concepts import Concept, ChannelConcept
+from crp.concepts import Concept, TransformerChannelConcept
 from crp.graph import ModelGraph
 from typing import Callable, List, Dict, Union, Tuple
 import torch
@@ -185,7 +185,7 @@ class CondAttribution:
     def __call__(
             self, inputs: Union[torch.Tensor, Tuple[torch.Tensor]], conditions: List[Dict[str, List]],
             composite: Composite = None, record_layer: List[str] = [],
-            mask_map: Union[Callable, Dict[str, Callable]] = ChannelConcept.mask, start_layer: str = None, init_rel=None,
+            mask_map: Union[Callable, Dict[str, Callable]] = TransformerChannelConcept.mask, start_layer: str = None, init_rel=None,
             on_device: str = None, exclude_parallel=True, additional_forward_kwargs: Dict[str, torch.Tensor] = {}) -> attrResult:
 
         """
@@ -301,7 +301,7 @@ class CondAttribution:
     def _attribute(
             self, inputs: Union[torch.Tensor, Tuple[torch.Tensor]], conditions: List[Dict[str, List]],
             composite: Composite = None, record_layer: List[str] = [],
-            mask_map: Union[Callable, Dict[str, Callable]] = ChannelConcept.mask, start_layer: str = None, init_rel=None,
+            mask_map: Union[Callable, Dict[str, Callable]] = TransformerChannelConcept.mask, start_layer: str = None, init_rel=None,
             on_device: str = None, exclude_parallel=True, additional_forward_kwargs: Dict[str, torch.Tensor] = {}) -> attrResult:
         """
         Computes the actual attributions as described in __call__ method docstring.
@@ -361,7 +361,7 @@ class CondAttribution:
     def generate(
             self, inputs: Union[torch.Tensor, Tuple[torch.Tensor]], conditions: List[Dict[str, List]],
             composite: Composite = None, record_layer: List[str] = [],
-            mask_map: Union[Callable, Dict[str, Callable]] = ChannelConcept.mask, start_layer: str = None, init_rel=None,
+            mask_map: Union[Callable, Dict[str, Callable]] = TransformerChannelConcept.mask, start_layer: str = None, init_rel=None,
             batch_size=10, on_device=None, exclude_parallel=True, verbose=True, additional_forward_kwargs: Dict[str, torch.Tensor] = {}) -> attrResult:
         """
         Computes several conditional attributions for single data point by broadcasting 'inputs' to length 'batch_size' and

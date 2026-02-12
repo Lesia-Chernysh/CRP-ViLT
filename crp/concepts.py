@@ -194,22 +194,23 @@ class TransformerChannelConcept(Concept):
         Parameters:
             max_target: str. Either 'sum' or 'max'.
         """
-
+        
         # position of receptive field neuron
-        rf_neuron = torch.argmax(relevance, dim=-1)
-
-        # channel maximization target
+        rf_neuron = torch.argmax(relevance, dim=-2)
+        
+        # channel maximization target --> sum relevance in channel across tokens
         if max_target == "sum":
-            rel_l = torch.sum(relevance, dim=-1)
+            rel_l = torch.sum(relevance, dim=-2)
 
+        # if choosing only max target pick max relevance in channel across tokens
         elif max_target == "max":
-            rel_l = torch.gather(relevance, -1, rf_neuron.unsqueeze(-1)).squeeze(-1)
+            rel_l = torch.amax(relevance, dim=-2)
 
         else:
             raise ValueError("'max_target' supports only 'max' or 'sum'.")
-
+        
         if abs_norm:
-            rel_l = rel_l / (torch.abs(rel_l).sum(-1).view(-1, 1) + 1e-10)
+            rel_l = rel_l / (torch.abs(rel_l).sum(-1, keepdim=True) + 1e-10)
         
         d_ch_sorted = torch.argsort(rel_l, dim=0, descending=True)
         rel_ch_sorted = torch.gather(rel_l, 0, d_ch_sorted)
