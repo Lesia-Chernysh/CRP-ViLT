@@ -177,6 +177,41 @@ class TransformerChannelConcept(Concept):
 
         return mask_fct
 
+    @staticmethod
+    def mask_rf(batch_id: int, c_n_map: Dict[int, List], layer_name=None):
+        """
+        Wrapper that generates a function that modifies the gradient (replaced by zennit by attributions) for a single neuron.
+
+        Parameters:
+        ----------
+        batch_id: int
+            Specifies the batch dimension in the torch.Tensor.
+        c_n_map: dist with int keys and list values
+            Keys correspond to channel indices and values correspond to neuron indices.
+            Neuron Indices are counted as if the 2D Channel has 1D dimension i.e. channel dimension [3, 20, 20] -> [3, 400],
+            so that neuron indices range between 0 and 399.
+
+        Returns:
+        --------
+        callable function that modifies the gradient
+        """
+
+        def mask_fct(grad):
+
+            grad_shape = grad.shape
+            grad = grad.view(*grad_shape[:2], -1)
+
+            mask = torch.zeros_like(grad[batch_id])
+
+            for channel in c_n_map:
+            
+                mask[c_n_map[channel], channel] = 1
+
+            grad[batch_id] = grad[batch_id] * mask
+            return grad.view(grad_shape)
+
+        return mask_fct
+            
     def attribute(self, relevance, mask=None, layer_name: str = None, abs_norm=True):
 
         if isinstance(mask, torch.Tensor):
@@ -192,10 +227,11 @@ class TransformerChannelConcept(Concept):
     def reference_sampling(self, relevance, layer_name: str = None, max_target: str = "sum", abs_norm=True):
         """
         Parameters:
+            relevance: tensor [batch, tokens, embed_dim/channels]
             max_target: str. Either 'sum' or 'max'.
         """
         
-        # position of receptive field neuron
+        # position of receptive field neuron #TODO: does this make sense also for transformers without max-pooling?
         rf_neuron = torch.argmax(relevance, dim=-2)
         
         # channel maximization target --> sum relevance in channel across tokens
@@ -211,9 +247,10 @@ class TransformerChannelConcept(Concept):
         
         if abs_norm:
             rel_l = rel_l / (torch.abs(rel_l).sum(-1, keepdim=True) + 1e-10)
-        
+
+        # sort in dataset index order
         d_ch_sorted = torch.argsort(rel_l, dim=0, descending=True)
-        rel_ch_sorted = torch.gather(rel_l, 0, d_ch_sorted)
-        rf_ch_sorted = torch.gather(rf_neuron, 0, d_ch_sorted)
+        rel_ch_sorted = torch.gather(rel_l, dim=0, index=d_ch_sorted)
+        rf_ch_sorted = torch.gather(rf_neuron, dim=0, index=d_ch_sorted)
 
         return d_ch_sorted, rel_ch_sorted, rf_ch_sorted
