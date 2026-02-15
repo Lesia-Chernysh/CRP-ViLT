@@ -309,7 +309,7 @@ class ViLTFeatureVisualization:
 
     @cache_reference
     def get_stats_reference(self, concept_id: int, layer_name: str, targets: Union[int, list], mode="relevance", r_range: Tuple[int, int] = (0, 8),
-            attribute=True, rf=False, plot_fn=vis_img_heatmap, batch_size=32):
+            attribute=False, rf=False, plot_fn=vis_img_heatmap, batch_size=32):
         """
         Retreive reference samples for a single concept in a layer wrt. different explanation targets i.e. returns the reference samples
         that are computed by self.compute_stats. Relevance and Activation are availble if FeatureVisualization was computed for the statitics mode. 
@@ -378,7 +378,7 @@ class ViLTFeatureVisualization:
             heatmaps = self._attribution_on_reference(inputs, c_id, layer_name, None, rf, n_indices, batch_size)
 
             if callable(plot_fn):
-                return plot_fn(inputs, heatmaps, rf)
+                return plot_fn(inputs.pixel_values, heatmaps[0], rf)
             else:
                 return inputs, heatmaps
 
@@ -397,7 +397,8 @@ class ViLTFeatureVisualization:
         if rf and (len(neuron_ids) != n_samples):
             raise ValueError("length of 'neuron_ids' must be equal to the length of 'inputs'")
 
-        heatmaps = []
+        img_heatmaps = []
+        txt_heatmaps = []
         for b in range(batches):
             for key, input_batch in inputs.items():
                 inputs[key] = input_batch[b * batch_size: (b + 1) * batch_size]
@@ -412,14 +413,15 @@ class ViLTFeatureVisualization:
                 # initialize relevance with activation before non-linearity (could be changed in a future release)
                 attr = self.attribution((inputs.pixel_values, inputs.input_embeds), conditions, composite, start_layer=layer_name, on_device=self.device, exclude_parallel=False, additional_forward_kwargs={"token_type_ids":inputs.token_type_ids, "attention_mask":inputs.attention_mask, "pixel_mask":inputs.pixel_mask})
 
-            heatmaps.append(attr.heatmap)
+            img_heatmaps.extend(attr.heatmap[0].sum(1))
+            txt_heatmaps.extend(attr.heatmap[1].sum(-1))
 
-        return heatmaps
+        return (img_heatmaps, txt_heatmaps)
 
     def compute_stats(self, concept_id, layer_name: str, mode="relevance", top_N=5, mean_N=10, norm=False) -> Tuple[list, list]:
         """
-        Computes statistics about the targets i.e. classes that are most relevant or most activating for the concept with index 'concept_id'
-        in layer 'layer_name'. Statistics must be computed before utilizing this method.
+        Computes statistics about the targets i.e. output classes for which the concept with index 'concept_id' in layer 'layer_name' 
+        is most relevant or most activated. Statistics must be computed before utilizing this method.
 
         Parameters:
         -----------
