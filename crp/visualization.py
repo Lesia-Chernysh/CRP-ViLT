@@ -24,11 +24,12 @@ class ViLTFeatureVisualization:
 
     def __init__(
             self, attribution: CondAttribution, dataset, layer_map: Dict[str, Concept], processor=None,
-            max_target="sum", abs_norm=True, path="FeatureVisualization", device=None, cache: Cache=None):
+            max_target="sum", abs_norm=True, path="FeatureVisualization", device=None, cache: Cache=None, seed=0):
 
         self.dataset = dataset
         self.layer_map = layer_map
         self.processor = processor
+        self.seed = seed
 
         self.attribution = attribution
 
@@ -59,6 +60,10 @@ class ViLTFeatureVisualization:
         max batch_size = max(multi_targets) * data_batch
         data_end: exclusively counted
         """
+        
+        if self.seed:
+            torch.manual_seed(self.seed)
+            np.random.seed(self.seed)
 
         self.saved_checkpoints = {"r_max": [], "a_max": [], "r_stats": [], "a_stats": []}
         last_checkpoint = 0
