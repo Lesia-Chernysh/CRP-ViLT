@@ -12,7 +12,7 @@ from tqdm import tqdm
 from zennit.composites import NameMapComposite, Composite
 from crp.attribution import CondAttribution
 from crp.maximization import Maximization
-from crp.concepts import TransformerChannelConcept, Concept
+from crp.concepts import Concept
 from crp.statistics import Statistics
 from crp.hooks import FeatVisHook
 from crp.helper import load_maximization, load_statistics, load_stat_targets
@@ -411,12 +411,12 @@ class ViLTFeatureVisualization:
             if rf:
                 batch_neuron_ids = neuron_ids[b * batch_size: (b + 1) * batch_size]
                 conditions = [{layer_name: {concept_id: n_index}} for n_index in batch_neuron_ids]
-                attr = self.attribution((inputs.pixel_values, inputs.input_embeds), conditions, composite, mask_map=TransformerChannelConcept.mask_rf, start_layer=layer_name, on_device=self.device, 
+                attr = self.attribution((inputs.pixel_values, inputs.input_embeds), conditions, composite, mask_map=self.layer_map[layer_name].mask_rf, start_layer=layer_name, on_device=self.device, 
                     exclude_parallel=False, additional_forward_kwargs={"token_type_ids":inputs.token_type_ids, "attention_mask":inputs.attention_mask, "pixel_mask":inputs.pixel_mask})
             else:
                 conditions = [{layer_name: [concept_id]}] 
                 # initialize relevance with activation before non-linearity (could be changed in a future release)
-                attr = self.attribution((inputs.pixel_values, inputs.input_embeds), conditions, composite, start_layer=layer_name, on_device=self.device, exclude_parallel=False, additional_forward_kwargs={"token_type_ids":inputs.token_type_ids, "attention_mask":inputs.attention_mask, "pixel_mask":inputs.pixel_mask})
+                attr = self.attribution((inputs.pixel_values, inputs.input_embeds), conditions, composite, mask_map=self.layer_map[layer_name].mask, start_layer=layer_name, on_device=self.device, exclude_parallel=False, additional_forward_kwargs={"token_type_ids":inputs.token_type_ids, "attention_mask":inputs.attention_mask, "pixel_mask":inputs.pixel_mask})
 
             img_heatmaps.extend(attr.heatmap[0].sum(1))
             txt_heatmaps.extend(attr.heatmap[1].sum(-1))
