@@ -40,9 +40,9 @@ def get_crop_range(heatmap, crop_th):
 
 
 @torch.no_grad()
-def vis_opaque_img(data_batch, heatmaps, rf=False, alpha=0.3, vis_th=0.2, crop_th=0.1, kernel_size=19) -> Image.Image:
+def vis_opaque_img(data_batch, heatmaps, rf=False, alpha=0.3, mask_th=0.2, mask_abs=True, crop_th=0.1, kernel_size=19) -> Image.Image:
     """
-    Draws reference images. The function lowers the opacity in regions with relevance lower than max(relevance)*vis_th.
+    Draws reference images. The function lowers the opacity in regions with relevance lower than max(relevance)*mask_th.
     In addition, the reference image can be cropped where relevance is less than max(relevance)*crop_th by setting 'rf' to True.
 
     Parameters:
@@ -56,8 +56,10 @@ def vis_opaque_img(data_batch, heatmaps, rf=False, alpha=0.3, vis_th=0.2, crop_t
         The amount of cropping is further specified by the 'crop_th' argument.
     alpha: between [0 and 1]
         Regulates the transparency in low relevance regions.
-    vis_th: between [0 and 1)
-        Visualization Threshold: Increases transparency in regions where relevance is smaller than max(relevance)*vis_th.
+    mask_th: between [0 and 1)
+        Visualization Threshold: Increases transparency in regions where relevance is smaller than max(relevance)*mask_th.
+    mask_abs: bool
+        If true, cropping uses absolute value of heatmap.
     crop_th: between [0 and 1)
         Cropping Threshold: Crops the image in regions where relevance is smaller than max(relevance)*crop_th. 
         Cropping is only applied, if receptive field 'rf' is set to True.
@@ -73,8 +75,8 @@ def vis_opaque_img(data_batch, heatmaps, rf=False, alpha=0.3, vis_th=0.2, crop_t
 
     if alpha > 1 or alpha < 0:
         raise ValueError("'alpha' must be between [0, 1]")
-    if vis_th >= 1 or vis_th < 0:
-        raise ValueError("'vis_th' must be between [0, 1)")
+    if mask_th >= 1 or mask_th < 0:
+        raise ValueError("'mask_th' must be between [0, 1)")
     if crop_th >= 1 or crop_th < 0:
         raise ValueError("'crop_th' must be between [0, 1)")
 
@@ -83,8 +85,9 @@ def vis_opaque_img(data_batch, heatmaps, rf=False, alpha=0.3, vis_th=0.2, crop_t
 
         img = data_batch[i]
 
-        filtered_heat = max_norm(gaussian_blur(heatmaps[i].unsqueeze(0), kernel_size=kernel_size)[0])
-        vis_mask = filtered_heat > vis_th 
+        mask_heatmap = heatmaps[i].abs() if mask_abs else heatmaps[i]
+        filtered_heat = max_norm(gaussian_blur(mask_heatmap.unsqueeze(0), kernel_size=kernel_size)[0])
+        vis_mask = filtered_heat > mask_th 
        
         if rf:
             row1, row2, col1, col2 = get_crop_range(filtered_heat, crop_th)
@@ -107,7 +110,7 @@ def vis_opaque_img(data_batch, heatmaps, rf=False, alpha=0.3, vis_th=0.2, crop_t
 
 
 @torch.no_grad()
-def vis_img_heatmap(data_batch, heatmaps, rf=False, crop_th=0.1, kernel_size=19, cmap="bwr", vmin=None, vmax=None, symmetric=True) -> Tuple[Image.Image, Image.Image]:
+def vis_img_heatmap(data_batch, heatmaps, rf=False, crop_th=0.1, crop_abs=True, kernel_size=19, cmap="bwr", vmin=None, vmax=None, symmetric=True) -> Tuple[Image.Image, Image.Image]:
     """
     Draws reference images and their conditional heatmaps. The function illustrates images using zennit.imgify and applies the supplied 'cmap' to heatmaps.
     In addition, the reference images and heatmaps can be cropped where relevance is less than max(relevance)*crop_th by setting 'rf' to True.
@@ -124,6 +127,8 @@ def vis_img_heatmap(data_batch, heatmaps, rf=False, crop_th=0.1, kernel_size=19,
     crop_th: between [0 and 1)
         Cropping Threshold: Crops the image in regions where relevance is smaller than max(relevance)*crop_th. 
         Cropping is only applied, if receptive field 'rf' is set to True.
+    crop_abs: bool
+        If true, cropping uses absolute value of heatmap.
     kernel_size: scalar
         Parameter of the torchvision.transforms.functional.gaussian_blur function used to smooth the CRP heatmap.
 
@@ -144,14 +149,15 @@ def vis_img_heatmap(data_batch, heatmaps, rf=False, crop_th=0.1, kernel_size=19,
         heat = heatmaps[i]
 
         if rf:
-            filtered_heat = max_norm(gaussian_blur(heat.unsqueeze(0), kernel_size=kernel_size)[0])
+            crop_heat = heat.abs() if crop_abs else heat
+            filtered_heat = max_norm(gaussian_blur(crop_heat.unsqueeze(0), kernel_size=kernel_size)[0])
             row1, row2, col1, col2 = get_crop_range(filtered_heat, crop_th)
             
             img_t = img[..., row1:row2, col1:col2]
             heat_t = heat[row1:row2, col1:col2]
 
             if img_t.sum() != 0 and heat_t.sum() != 0:
-                # check whether img or vis_mask is not empty
+                # only crop when cropped img and heatmap are not empty
                 img = img_t
                 heat = heat_t
 
