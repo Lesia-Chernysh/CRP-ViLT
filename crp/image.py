@@ -273,7 +273,7 @@ def plot_grid(ref_c: Dict[int, Any], cmap_dim=1, cmap="bwr", vmin=None, vmax=Non
             else:
                 img_list = ref_c[keys[i]]
             
-            for c in range(ncols):
+            for c in range(min(ncols, len(img_list))):
                 ax = plt.Subplot(fig, inner[sr, c])
 
                 if sr == cmap_dim:
