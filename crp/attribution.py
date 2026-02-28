@@ -17,7 +17,7 @@ attrGraphResult = namedtuple("AttributionGraphResults", "nodes, connections")
 
 class CondAttribution:
 
-    def __init__(self, model: torch.nn.Module, device: torch.device = None, overwrite_input_grad=True, no_param_grad=True) -> None:
+    def __init__(self, model: torch.nn.Module, device: torch.device = None, overwrite_input_grad=True, no_param_grad=True, seed: int = 0) -> None:
         """
         This class contains the functionality to compute conditional attributions.
 
@@ -37,6 +37,7 @@ class CondAttribution:
         self.device = next(model.parameters()).device if device is None else device
         self.model = model
         self.overwrite_input_grad = overwrite_input_grad
+        self.seed = seed
 
         if no_param_grad:
             self.model.requires_grad_(False)
@@ -337,6 +338,9 @@ class CondAttribution:
 
         with mask_composite.context(self.model), composite.context(self.model) as modified:
 
+            torch.manual_seed(self.seed)
+            np.random.seed(self.seed)
+            
             if start_layer:
                 _ = modified(*inputs, **additional_forward_kwargs)
                 pred = layer_out[start_layer]
@@ -414,6 +418,9 @@ class CondAttribution:
 
         with mask_composite.context(self.model), composite.context(self.model) as modified:
 
+            torch.manual_seed(self.seed)
+            np.random.seed(self.seed)
+            
             if start_layer:
                 _ = modified(*inputs_batched, **additional_forward_kwargs)
                 pred = layer_out[start_layer]
