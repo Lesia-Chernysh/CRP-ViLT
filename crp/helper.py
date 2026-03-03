@@ -3,6 +3,9 @@ import numpy as np
 from typing import List
 import os
 from pathlib import Path
+from collections import namedtuple
+
+MaxStats = namedtuple("MaxStats", "sample_idx rel_or_act rf_idx")
 
 
 def get_layer_names(model: torch.nn.Module, types: List):
@@ -87,7 +90,7 @@ def load_maximization(path_folder, layer_name):
     rel_c_sorted = np.load(Path(path_folder) / Path(filename + "rel.npy"), mmap_mode="r")
     rf_c_sorted = np.load(Path(path_folder) / Path(filename + "rf.npy"), mmap_mode="r")
 
-    return d_c_sorted, rel_c_sorted, rf_c_sorted
+    return MaxStats(d_c_sorted, rel_c_sorted, rf_c_sorted)
 
 def load_stat_targets(path_folder):
 
@@ -104,7 +107,7 @@ def load_statistics(path_folder, layer_name, target):
     rel_c_sorted = np.load(Path(path_folder) / Path(layer_name) / Path(filename + "rel.npy"), mmap_mode="r")
     rf_c_sorted = np.load(Path(path_folder) / Path(layer_name) / Path(filename + "rf.npy"), mmap_mode="r")
 
-    return d_c_sorted, rel_c_sorted, rf_c_sorted
+    return MaxStats(d_c_sorted, rel_c_sorted, rf_c_sorted)
 
 
 def load_receptive_field(path_folder, layer_name):
