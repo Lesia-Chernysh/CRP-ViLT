@@ -123,8 +123,8 @@ class ChannelConcept(Concept):
         """
 
         # position of receptive field neuron
-        rel_l = relevance.view(*relevance.shape[:2], -1)
-        rf_neuron = torch.argmax(rel_l, dim=-1)
+        rel_l = relevance.view(*relevance.shape[:2], -1) # TODO should ignore padding
+        rf_neuron = torch.argmax(rel_l, dim=-1) # TODO should this be the argmax of the absolute value? or argmax of whatever sign the sum has?
 
         # channel maximization target
         if max_target == "sum":
@@ -198,17 +198,14 @@ class TransformerChannelConcept(Concept):
 
         def mask_fct(grad):
 
-            grad_shape = grad.shape
-            grad = grad.view(*grad_shape[:2], -1)
-
             mask = torch.zeros_like(grad[batch_id])
-
-            for channel in c_n_map:
             
-                mask[c_n_map[channel], channel] = 1
-
+            for concept, neuron in c_n_map.items():
+                mask[..., neuron, concept] = 1
+                
             grad[batch_id] = grad[batch_id] * mask
-            return grad.view(grad_shape)
+            
+            return grad
 
         return mask_fct
             
@@ -229,6 +226,7 @@ class TransformerChannelConcept(Concept):
         Parameters:
             relevance: tensor [batch, tokens, embed_dim/channels]
             max_target: str. Either 'sum' or 'max'.
+            abs_norm: bool. Whether the relevance is normalized
         """
         
         # position of receptive field neuron #TODO: does this make sense also for transformers without max-pooling?
