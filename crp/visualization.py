@@ -308,7 +308,7 @@ class ViLTFeatureVisualization:
         return ref_c
 
     @cache_reference
-    def get_stats_reference(self, concept_id: int, layer_name: str, targets: Union[int, list], mode="relevance", r_range: Tuple[int, int] = (0, 8),
+    def get_stats_reference(self, concept_ids: Union[int, list], layer_name: str, targets: Union[int, list], mode="relevance", r_range: Tuple[int, int] = (0, 8),
             attribute=False, rf=False, plot_fn=vis_img_heatmap, batch_size=32):
         """
         Retreive reference samples for a single concept in a layer wrt. different explanation targets i.e. returns the reference samples
@@ -350,6 +350,8 @@ class ViLTFeatureVisualization:
         ref_t = {}
         if not isinstance(targets, Iterable):
             targets = [targets]
+        if not isinstance(concept_ids, Iterable):
+            concept_ids = [concept_ids]
         if mode == "relevance":
             path = self.RelStats.PATH
         elif mode == "activation":
@@ -360,13 +362,14 @@ class ViLTFeatureVisualization:
         if rf and not attribute:
             warnings.warn("The receptive field is only computed, if you set `attribute`.")
 
-        for t in targets:
-            
-            d_c_sorted, _, rf_c_sorted = load_statistics(path, layer_name, t)
-            d_indices = d_c_sorted[r_range[0]:r_range[1], concept_id]
-            n_indices = rf_c_sorted[r_range[0]:r_range[1], concept_id]
-
-            ref_t[f"{concept_id}:{t}"] = self._load_ref_and_attribution(d_indices, concept_id, n_indices, layer_name, attribute, rf, plot_fn, batch_size)
+        for concept_id in concept_ids:
+            for t in targets:
+                
+                d_c_sorted, _, rf_c_sorted = load_statistics(path, layer_name, t)
+                d_indices = d_c_sorted[r_range[0]:r_range[1], concept_id]
+                n_indices = rf_c_sorted[r_range[0]:r_range[1], concept_id]
+    
+                ref_t[f"{concept_id}:{t}"] = self._load_ref_and_attribution(d_indices, concept_id, n_indices, layer_name, attribute, rf, plot_fn, batch_size)
 
         return ref_t
 
