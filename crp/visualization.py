@@ -104,9 +104,11 @@ class ViLTFeatureVisualization:
             # dict_inputs is linked to FeatHooks
             dict_inputs["sample_indices"] = sample_indices
             dict_inputs["targets"] = targets
+            additional_forward_kwargs = {"token_type_ids":inputs.token_type_ids, "attention_mask":inputs.attention_mask, "pixel_mask":inputs.pixel_mask}
+            dict_inputs["additional_forward_kwargs"] = additional_forward_kwargs
 
             # composites are already registered before
-            self.attribution((inputs.pixel_values, inputs.input_embeds), conditions, None, exclude_parallel=False, additional_forward_kwargs={"token_type_ids":inputs.token_type_ids, "attention_mask":inputs.attention_mask, "pixel_mask":inputs.pixel_mask})
+            self.attribution((inputs.pixel_values, inputs.input_embeds), conditions, None, exclude_parallel=False, additional_forward_kwargs=additional_forward_kwargs)
 
             if b % checkpoint == checkpoint - 1:
                 self._save_results((last_checkpoint, b + 1))
@@ -139,18 +141,18 @@ class ViLTFeatureVisualization:
 
         
     @torch.no_grad()
-    def analyze_relevance(self, rel, layer_name, concept, data_indices, targets):
+    def analyze_relevance(self, rel, layer_name, concept, data_indices, targets, additional_forward_kwargs):
         """
         Finds input samples that maximally activate each neuron in a layer and most relevant samples
         """
         d_c_sorted, rel_c_sorted, rf_c_sorted, t_c_sorted = self.RelMax.analyze_layer(
-            rel, concept, layer_name, data_indices, targets)
+            rel, concept, layer_name, data_indices, targets, additional_forward_kwargs)
 
         self.RelStats.analyze_layer(d_c_sorted, rel_c_sorted, rf_c_sorted, t_c_sorted, layer_name)
 
     
     @torch.no_grad()
-    def analyze_activation(self, act, layer_name, concept, data_indices, targets):
+    def analyze_activation(self, act, layer_name, concept, data_indices, targets, additional_forward_kwargs):
         """
         Finds input samples that maximally activate each neuron in a layer and most relevant samples
         """
@@ -163,7 +165,7 @@ class ViLTFeatureVisualization:
         targets = targets[unique_indices]
 
         d_c_sorted, act_c_sorted, rf_c_sorted, t_c_sorted = self.ActMax.analyze_layer(
-            act, concept, layer_name, data_indices, targets)
+            act, concept, layer_name, data_indices, targets, additional_forward_kwargs)
 
         self.ActStats.analyze_layer(d_c_sorted, act_c_sorted, rf_c_sorted, t_c_sorted, layer_name)
 

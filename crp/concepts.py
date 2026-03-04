@@ -8,15 +8,15 @@ class Concept:
     Abstract class that imlplements the core functionality for the attribution computation of concepts.
     """
 
-    def mask(self, batch_id, concept_ids, layer_name):
+    def mask(self, batch_id, concept_ids, layer_name, additional_forward_kwargs=None):
 
         raise NotImplementedError("'Concept'class must be implemented!")
 
-    def mask_rf(self, neuron_ids, layer_name):
+    def mask_rf(self, neuron_ids, layer_name, additional_forward_kwargs=None):
 
         raise NotImplementedError("'Concept'class must be implemented!")
 
-    def reference_sampling(self, relevance, layer_name: str = None, max_target: str = "sum", abs_norm=True):
+    def reference_sampling(self, relevance, layer_name: str = None, max_target: str = "sum", abs_norm=True, additional_forward_kwargs=None):
 
         raise NotImplementedError("'Concept'class must be implemented!")
 
@@ -35,7 +35,7 @@ class ChannelConcept(Concept):
     """
 
     @staticmethod
-    def mask(batch_id: int, concept_ids: List, layer_name=None):
+    def mask(batch_id: int, concept_ids: List, layer_name=None, additional_forward_kwargs=None):
         """
         Wrapper that generates a function thath modifies the gradient (replaced by zennit by attributions).
 
@@ -62,7 +62,7 @@ class ChannelConcept(Concept):
         return mask_fct
 
     @staticmethod
-    def mask_rf(batch_id: int, c_n_map: Dict[int, List], layer_name=None):
+    def mask_rf(batch_id: int, c_n_map: Dict[int, List], layer_name=None, additional_forward_kwargs=None):
         """
         Wrapper that generates a function that modifies the gradient (replaced by zennit by attributions) for a single neuron.
 
@@ -116,7 +116,7 @@ class ChannelConcept(Concept):
 
         return rel_l
 
-    def reference_sampling(self, relevance, layer_name: str = None, max_target: str = "sum", abs_norm=True):
+    def reference_sampling(self, relevance, layer_name: str = None, max_target: str = "sum", abs_norm=True, additional_forward_kwargs=None):
         """
         Parameters:
             max_target: str. Either 'sum' or 'max'.
@@ -151,7 +151,7 @@ class TransformerChannelConcept(Concept):
     """
 
     @staticmethod
-    def mask(batch_id: int, concept_ids: List, layer_name=None):
+    def mask(batch_id: int, concept_ids: List, layer_name=None, additional_forward_kwargs=None):
         """
         Wrapper that generates a function that modifies the gradient (replaced by zennit by attributions).
 
@@ -178,7 +178,7 @@ class TransformerChannelConcept(Concept):
         return mask_fct
 
     @staticmethod
-    def mask_rf(batch_id: int, c_n_map: Dict[int, List], layer_name=None):
+    def mask_rf(batch_id: int, c_n_map: Dict[int, List], layer_name=None, additional_forward_kwargs=None):
         """
         Wrapper that generates a function that modifies the gradient (replaced by zennit by attributions) for a single neuron.
 
@@ -221,7 +221,7 @@ class TransformerChannelConcept(Concept):
 
         return rel_l
 
-    def reference_sampling(self, relevance, layer_name: str = None, max_target: str = "sum", abs_norm=True):
+    def reference_sampling(self, relevance, layer_name: str = None, max_target: str = "sum", abs_norm=True, additional_forward_kwargs=None):
         """
         Parameters:
             relevance: tensor [batch, tokens, embed_dim/channels]

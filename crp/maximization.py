@@ -40,10 +40,10 @@ class Maximization:
         # TODO: activation in save path instead of relevance!
         # TODO: for statistics in other class: make dummy variable for extra datset instead of SDS
 
-    def analyze_layer(self, rel, concept: Concept, layer_name: str, data_indices, targets):
+    def analyze_layer(self, rel, concept: Concept, layer_name: str, data_indices, targets, additional_forward_kwargs):
 
         b_c_sorted, rel_c_sorted, rf_c_sorted = concept.reference_sampling(
-            rel, layer_name, self.max_target, self.abs_norm)
+            rel, layer_name, self.max_target, self.abs_norm, additional_forward_kwargs)
         # convert batch index to dataset wide index
         data_indices = torch.from_numpy(data_indices).to(b_c_sorted)
         d_c_sorted = torch.take(data_indices, b_c_sorted)

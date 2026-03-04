@@ -171,12 +171,12 @@ class CondAttribution:
                                      " same layer names. (This limitation does not apply to the __call__ method)")
 
 
-    def _register_mask_fn(self, hook, mask_map, b_index, c_indices, l_name):
+    def _register_mask_fn(self, hook, mask_map, b_index, c_indices, l_name, additional_forward_kwargs):
 
         if callable(mask_map):
-            mask_fn = mask_map(b_index, c_indices, l_name)
+            mask_fn = mask_map(b_index, c_indices, l_name, additional_forward_kwargs)
         elif isinstance(mask_map, Dict):
-            mask_fn = mask_map[l_name](b_index, c_indices, l_name)
+            mask_fn = mask_map[l_name](b_index, c_indices, l_name, additional_forward_kwargs)
         else:
             raise ValueError("<mask_map> must be a dictionary or callable function.")
 
@@ -324,7 +324,7 @@ class CondAttribution:
                 else:
                     if l_name not in hook_map:
                         hook_map[l_name] = MaskHook([])
-                    self._register_mask_fn(hook_map[l_name], mask_map, i, indices, l_name)
+                    self._register_mask_fn(hook_map[l_name], mask_map, i, indices, l_name, additional_forward_kwargs)
                     if l_name not in cond_l_names:
                         cond_l_names.append(l_name)
 
@@ -446,7 +446,7 @@ class CondAttribution:
                         if l_name == self.MODEL_OUTPUT_NAME:
                             y_targets.append(indices)
                         else:
-                            self._register_mask_fn(hook_map[l_name], mask_map, i, indices, l_name)
+                            self._register_mask_fn(hook_map[l_name], mask_map, i, indices, l_name, additional_forward_kwargs)
 
                 if b == batches-1:
                     # last batch may have len(y_targets) != batch_size. Padded part is ignored later.

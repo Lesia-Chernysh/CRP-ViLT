@@ -72,9 +72,9 @@ class FeatVisHook:
     def post_forward(self, module, input, output):
         '''Register a backward-hook to the resulting tensor right after the forward.'''
 
-        s_indices, targets = self.dict_inputs["sample_indices"], self.dict_inputs["targets"]
+        s_indices, targets, additional_forward_kwargs = self.dict_inputs["sample_indices"], self.dict_inputs["targets"], self.dict_inputs["additional_forward_kwargs"]
         activation = output.detach().to(self.on_device) if self.on_device else output.detach()
-        self.FV.analyze_activation(activation, self.layer_name, self.concept, s_indices, targets)
+        self.FV.analyze_activation(activation, self.layer_name, self.concept, s_indices, targets, additional_forward_kwargs)
 
         hook_ref = weakref.ref(self)
 
@@ -93,9 +93,9 @@ class FeatVisHook:
     def backward(self, module, grad):
         '''Hook applied during backward-pass'''
 
-        s_indices, targets = self.dict_inputs["sample_indices"], self.dict_inputs["targets"]
+        s_indices, targets, additional_forward_kwargs = self.dict_inputs["sample_indices"], self.dict_inputs["targets"], self.dict_inputs["additional_forward_kwargs"]
         relevance = grad.detach().to(self.on_device) if self.on_device else grad.detach()
-        self.FV.analyze_relevance(relevance, self.layer_name, self.concept, s_indices, targets)
+        self.FV.analyze_relevance(relevance, self.layer_name, self.concept, s_indices, targets, additional_forward_kwargs)
 
         return grad
 
