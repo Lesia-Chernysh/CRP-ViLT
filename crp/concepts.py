@@ -16,7 +16,7 @@ class Concept:
 
         raise NotImplementedError("'Concept'class must be implemented!")
 
-    def reference_sampling(self, relevance, layer_name: str = None, max_target: str = "sum", abs_norm=True, additional_forward_kwargs=None):
+    def reference_sampling(self, relevance_or_activation, layer_name: str = None, max_target: str = "sum", abs_norm=True, additional_forward_kwargs=None):
 
         raise NotImplementedError("'Concept'class must be implemented!")
 
@@ -116,19 +116,24 @@ class ChannelConcept(Concept):
 
         return rel_l
 
-    def reference_sampling(self, relevance, layer_name: str = None, max_target: str = "sum", abs_norm=True, additional_forward_kwargs=None):
+    def reference_sampling(self, relevance_or_activation, layer_name: str = None, max_target: str = "sum", abs_norm=True, additional_forward_kwargs=None):
         """
+        Samples the most relevant/activated concepts for each sample in the batch. 
+        Total channel relevance/activation can be defined as the sum or the maximum of the relevances/activations of all neurons in the channel.
+
         Parameters:
+            relevance_or_activation: tensor [batch, tokens, embed_dim/channels]
             max_target: str. Either 'sum' or 'max'.
+            abs_norm: bool. Whether the relevance/activations are normalized
         """
 
         # position of receptive field neuron
-        rel_l = relevance.view(*relevance.shape[:2], -1) # TODO should ignore padding
-        rf_neuron = torch.argmax(rel_l, dim=-1) # TODO should this be the argmax of the absolute value? or argmax of whatever sign the sum has?
+        rel_l = relevance_or_activation.view(*relevance_or_activation.shape[:2], -1)
+        rf_neuron = torch.argmax(rel_l, dim=-1)
 
         # channel maximization target
         if max_target == "sum":
-            rel_l = torch.sum(relevance.view(*relevance.shape[:2], -1), dim=-1)
+            rel_l = torch.sum(rel_l, dim=-1)
 
         elif max_target == "max":
             rel_l = torch.gather(rel_l, -1, rf_neuron.unsqueeze(-1)).squeeze(-1)
@@ -221,24 +226,27 @@ class TransformerChannelConcept(Concept):
 
         return rel_l
 
-    def reference_sampling(self, relevance, layer_name: str = None, max_target: str = "sum", abs_norm=True, additional_forward_kwargs=None):
+    def reference_sampling(self, relevance_or_activation, layer_name: str = None, max_target: str = "sum", abs_norm=True, additional_forward_kwargs=None):
         """
-        Parameters:
-            relevance: tensor [batch, tokens, embed_dim/channels]
-            max_target: str. Either 'sum' or 'max'.
-            abs_norm: bool. Whether the relevance is normalized
-        """
-        
-        # position of receptive field neuron #TODO: does this make sense also for transformers without max-pooling?
-        rf_neuron = torch.argmax(relevance, dim=-2)
-        
-        # channel maximization target --> sum relevance in channel across tokens
-        if max_target == "sum":
-            rel_l = torch.sum(relevance, dim=-2)
+        Samples the most relevant/activated concepts for each sample in the batch. 
+        Total channel relevance/activation can be defined as the sum or the maximum of the relevances/activations of all neurons in the channel.
 
-        # if choosing only max target pick max relevance in channel across tokens
+        Parameters:
+            relevance_or_activation: tensor [batch, tokens, embed_dim/channels]
+            max_target: str. Either 'sum' or 'max'.
+            abs_norm: bool. Whether the relevance/activations are normalized
+        """
+        
+        # position of receptive field neuron
+        rf_neuron = torch.argmax(relevance_or_activation, dim=-2)
+        
+        # channel maximization target --> sum neurons in channel across tokens
+        if max_target == "sum":
+            rel_l = torch.sum(relevance_or_activation, dim=-2)
+
+        # if choosing only max target pick max neuron in channel across tokens
         elif max_target == "max":
-            rel_l = torch.amax(relevance, dim=-2)
+            rel_l = torch.amax(relevance_or_activation, dim=-2)
 
         else:
             raise ValueError("'max_target' supports only 'max' or 'sum'.")

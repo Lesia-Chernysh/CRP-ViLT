@@ -146,7 +146,7 @@ class ViLTFeatureVisualization:
         Finds input samples that maximally activate each neuron in a layer and most relevant samples
         """
         d_c_sorted, rel_c_sorted, rf_c_sorted, t_c_sorted = self.RelMax.analyze_layer(
-            rel, concept, layer_name, data_indices, targets, additional_forward_kwargs)
+            torch.abs(rel), concept, layer_name, data_indices, targets, additional_forward_kwargs)
 
         self.RelStats.analyze_layer(d_c_sorted, rel_c_sorted, rf_c_sorted, t_c_sorted, layer_name)
 
