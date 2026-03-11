@@ -8,11 +8,11 @@ class Concept:
     Abstract class that imlplements the core functionality for the attribution computation of concepts.
     """
 
-    def mask(self, batch_id, concept_ids, layer_name, additional_forward_kwargs=None):
+    def mask(self, batch_id, concept_ids, layer_name, additional_forward_kwargs=None, rf=False):
 
         raise NotImplementedError("'Concept'class must be implemented!")
 
-    def mask_rf(self, neuron_ids, layer_name, additional_forward_kwargs=None):
+    def mask_rf(self, neuron_ids, layer_name, additional_forward_kwargs=None, rf=False):
 
         raise NotImplementedError("'Concept'class must be implemented!")
 
@@ -35,7 +35,7 @@ class ChannelConcept(Concept):
     """
 
     @staticmethod
-    def mask(batch_id: int, concept_ids: List, layer_name=None, additional_forward_kwargs=None):
+    def mask(batch_id: int, concept_ids: List, layer_name=None, additional_forward_kwargs=None, rf=False):
         """
         Wrapper that generates a function thath modifies the gradient (replaced by zennit by attributions).
 
@@ -51,6 +51,7 @@ class ChannelConcept(Concept):
         callable function that modifies the gradient
         """
 
+
         def mask_fct(grad):
 
             mask = torch.zeros_like(grad[batch_id])
@@ -59,10 +60,26 @@ class ChannelConcept(Concept):
 
             return grad
 
+        def mask_fct_rf(grad):
+
+            grad_shape = grad.shape
+            grad = grad.view(*grad_shape[:2], -1)
+
+            mask = torch.zeros_like(grad[batch_id])
+
+            for concept_id in concept_ids:
+                mask[concept_id, torch.argmax(torch.abs(grad[batch_id, concept_id]))] = 1
+
+            grad[batch_id] = grad[batch_id] * mask
+            
+            return grad.view(grad_shape)
+
+        if rf:
+            return mask_fct_rf
         return mask_fct
 
     @staticmethod
-    def mask_rf(batch_id: int, c_n_map: Dict[int, List], layer_name=None, additional_forward_kwargs=None):
+    def mask_rf(batch_id: int, c_n_map: Dict[int, List], layer_name=None, additional_forward_kwargs=None, rf=False):
         """
         Wrapper that generates a function that modifies the gradient (replaced by zennit by attributions) for a single neuron.
 
@@ -156,7 +173,7 @@ class TransformerChannelConcept(Concept):
     """
 
     @staticmethod
-    def mask(batch_id: int, concept_ids: List, layer_name=None, additional_forward_kwargs=None):
+    def mask(batch_id: int, concept_ids: List, layer_name=None, additional_forward_kwargs=None, rf=False):
         """
         Wrapper that generates a function that modifies the gradient (replaced by zennit by attributions).
 
@@ -180,10 +197,25 @@ class TransformerChannelConcept(Concept):
 
             return grad
 
+        def mask_fct_rf(grad):
+
+            grad_shape = grad.shape
+
+            mask = torch.zeros_like(grad[batch_id])
+
+            for concept_id in concept_ids:
+                mask[..., torch.argmax(torch.abs(grad[batch_id, ..., concept_id])), concept_id] = 1
+
+            grad[batch_id] = grad[batch_id] * mask
+            
+            return grad
+
+        if rf:
+            return mask_fct_rf
         return mask_fct
 
     @staticmethod
-    def mask_rf(batch_id: int, c_n_map: Dict[int, List], layer_name=None, additional_forward_kwargs=None):
+    def mask_rf(batch_id: int, c_n_map: Dict[int, List], layer_name=None, additional_forward_kwargs=None, rf=False):
         """
         Wrapper that generates a function that modifies the gradient (replaced by zennit by attributions) for a single neuron.
 
@@ -222,7 +254,7 @@ class TransformerChannelConcept(Concept):
         rel_l = relevance.sum(dim=-2)
 
         if abs_norm:
-            rel_l = rel_l / (rel_l.sum(-1).view(-1, 1) + 1e-10)
+            rel_l = rel_l / (torch.abs(rel_l).sum(-1).view(-1, 1) + 1e-10)
 
         return rel_l
 

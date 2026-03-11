@@ -171,12 +171,12 @@ class CondAttribution:
                                      " same layer names. (This limitation does not apply to the __call__ method)")
 
 
-    def _register_mask_fn(self, hook, mask_map, b_index, c_indices, l_name, additional_forward_kwargs):
+    def _register_mask_fn(self, hook, mask_map, b_index, c_indices, l_name, additional_forward_kwargs, rf):
 
         if callable(mask_map):
-            mask_fn = mask_map(b_index, c_indices, l_name, additional_forward_kwargs)
+            mask_fn = mask_map(b_index, c_indices, l_name, additional_forward_kwargs, rf)
         elif isinstance(mask_map, Dict):
-            mask_fn = mask_map[l_name](b_index, c_indices, l_name, additional_forward_kwargs)
+            mask_fn = mask_map[l_name](b_index, c_indices, l_name, additional_forward_kwargs, rf)
         else:
             raise ValueError("<mask_map> must be a dictionary or callable function.")
 
@@ -187,7 +187,7 @@ class CondAttribution:
             self, inputs: Union[torch.Tensor, Tuple[torch.Tensor]], conditions: List[Dict[str, List]],
             composite: Composite = None, record_layer: List[str] = [],
             mask_map: Union[Callable, Dict[str, Callable]] = TransformerChannelConcept.mask, start_layer: str = None, init_rel=None,
-            on_device: str = None, exclude_parallel=True, additional_forward_kwargs: Dict[str, torch.Tensor] = {}) -> attrResult:
+            on_device: str = None, exclude_parallel=True, additional_forward_kwargs: Dict[str, torch.Tensor] = {}, rf=False) -> attrResult:
 
         """
         Computes conditional attributions by masking the gradient flow of PyTorch (that is replaced by zennit with relevance values).
@@ -244,9 +244,9 @@ class CondAttribution:
         """
         
         if exclude_parallel:
-            return self._conditions_wrapper(inputs, conditions, composite, record_layer, mask_map, start_layer, init_rel, on_device, True, additional_forward_kwargs)
+            return self._conditions_wrapper(inputs, conditions, composite, record_layer, mask_map, start_layer, init_rel, on_device, True, additional_forward_kwargs, rf)
         else:
-            return self._attribute(inputs, conditions, composite, record_layer, mask_map, start_layer, init_rel, on_device, False, additional_forward_kwargs)
+            return self._attribute(inputs, conditions, composite, record_layer, mask_map, start_layer, init_rel, on_device, False, additional_forward_kwargs, rf)
 
     def _conditions_wrapper(self, *args):
         """
@@ -303,7 +303,7 @@ class CondAttribution:
             self, inputs: Union[torch.Tensor, Tuple[torch.Tensor]], conditions: List[Dict[str, List]],
             composite: Composite = None, record_layer: List[str] = [],
             mask_map: Union[Callable, Dict[str, Callable]] = TransformerChannelConcept.mask, start_layer: str = None, init_rel=None,
-            on_device: str = None, exclude_parallel=True, additional_forward_kwargs: Dict[str, torch.Tensor] = {}) -> attrResult:
+            on_device: str = None, exclude_parallel=True, additional_forward_kwargs: Dict[str, torch.Tensor] = {}, rf=False) -> attrResult:
         """
         Computes the actual attributions as described in __call__ method docstring.
         exclude_parallel: boolean
@@ -324,7 +324,7 @@ class CondAttribution:
                 else:
                     if l_name not in hook_map:
                         hook_map[l_name] = MaskHook([])
-                    self._register_mask_fn(hook_map[l_name], mask_map, i, indices, l_name, additional_forward_kwargs)
+                    self._register_mask_fn(hook_map[l_name], mask_map, i, indices, l_name, additional_forward_kwargs, rf)
                     if l_name not in cond_l_names:
                         cond_l_names.append(l_name)
 
