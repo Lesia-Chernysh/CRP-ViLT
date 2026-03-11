@@ -1,6 +1,6 @@
 
 from typing import Dict, List, Union, Any, Tuple, Iterable
-from PIL import Image
+from PIL import Image, ImageDraw
 import torch
 from torchvision.transforms.functional import gaussian_blur
 import matplotlib.pyplot as plt
@@ -85,6 +85,7 @@ def vis_opaque_img(data_batch, heatmaps, rf=False, alpha=0.3, mask_th=0.2, mask_
 
         img = data_batch[i]
 
+        is_negative = heatmaps[i].sum() < 0
         mask_heatmap = heatmaps[i].abs() if mask_abs else heatmaps[i]
         filtered_heat = max_norm(gaussian_blur(mask_heatmap.unsqueeze(0), kernel_size=kernel_size)[0])
         vis_mask = filtered_heat > mask_th 
@@ -103,6 +104,14 @@ def vis_opaque_img(data_batch, heatmaps, rf=False, alpha=0.3, mask_th=0.2, mask_
         inv_mask = ~vis_mask
         img = img * vis_mask + img * inv_mask * alpha
         img = zimage.imgify(img.detach().cpu())
+
+        # draw a cross over image if it has negative relevance for the neuron
+        if is_negative:
+            draw = ImageDraw.Draw(img)
+            w, h = img.size
+            # Draw two lines to form an 'X'
+            draw.line([(0, 0), (w, h)], fill="black", width=1)
+            draw.line([(0, h), (w, 0)], fill="black", width=1)
 
         imgs.append(img)
 
