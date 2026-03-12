@@ -277,7 +277,7 @@ class CondAttribution:
                 heatmap = attr.heatmap
                 prediction = attr.prediction
             else:
-                heatmap = (torch.cat([h1, h2], dim=0) for h1, h2 in zip(heatmap, attr.heatmap))
+                heatmap = tuple(torch.cat([h1, h2], dim=0) for h1, h2 in zip(heatmap, attr.heatmap))
                 prediction = torch.cat([prediction, attr.prediction], dim=0)
 
         return attrResult(heatmap, activations, relevances, prediction)
@@ -366,7 +366,7 @@ class CondAttribution:
             self, inputs: Union[torch.Tensor, Tuple[torch.Tensor]], conditions: List[Dict[str, List]],
             composite: Composite = None, record_layer: List[str] = [],
             mask_map: Union[Callable, Dict[str, Callable]] = TransformerChannelConcept.mask, start_layer: str = None, init_rel=None,
-            batch_size=10, on_device=None, exclude_parallel=True, verbose=True, additional_forward_kwargs: Dict[str, torch.Tensor] = {}) -> attrResult:
+            batch_size=10, on_device=None, exclude_parallel=True, verbose=True, additional_forward_kwargs: Dict[str, torch.Tensor] = {}, rf=False) -> attrResult:
         """
         Computes several conditional attributions for single data point by broadcasting 'inputs' to length 'batch_size' and
         iterating through the 'conditions' list with stepsize 'batch_size'. The model forward pass is performed only once and 
@@ -382,7 +382,7 @@ class CondAttribution:
         """
         
         if not isinstance(inputs, tuple):
-            inputs = (inputs, )
+            inputs = (inputs,)
         self._check_arguments(inputs, conditions, start_layer, exclude_parallel, init_rel)
 
         # register on all layers in layer_map an empty hook
@@ -446,7 +446,7 @@ class CondAttribution:
                         if l_name == self.MODEL_OUTPUT_NAME:
                             y_targets.append(indices)
                         else:
-                            self._register_mask_fn(hook_map[l_name], mask_map, i, indices, l_name, additional_forward_kwargs)
+                            self._register_mask_fn(hook_map[l_name], mask_map, i, indices, l_name, additional_forward_kwargs, rf)
 
                 if b == batches-1:
                     # last batch may have len(y_targets) != batch_size. Padded part is ignored later.
