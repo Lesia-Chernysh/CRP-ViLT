@@ -1,12 +1,13 @@
 
 from typing import Dict, List, Union, Any, Tuple, Iterable
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 import torch
 from torchvision.transforms.functional import gaussian_blur
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy as np
 import zennit.image as zimage
+from zennit.image import interval_norm_bounds
 from crp.helper import max_norm
 
 def get_crop_range(heatmap, crop_th):
@@ -227,6 +228,213 @@ def imgify(image: Union[Image.Image, torch.Tensor, np.ndarray], cmap: str = "bwr
         img = new_im
 
     return img
+
+
+def _render_text_strip(
+        tokens: List[str],
+        scores: Union[torch.Tensor, np.ndarray],
+        width: int,
+        height: int = 48,
+        cmap: str = "bwr",
+        vmin=None,
+        vmax=None,
+        symmetric: bool = True,
+        font_size: int = 20,
+) -> Image.Image:
+    """
+    Render a simple colored text strip for one sequence of tokens and scores.
+    Colors are derived from the supplied colormap similarly to heatmaps.
+    """
+
+    if isinstance(scores, torch.Tensor):
+        s = scores.detach().cpu().float()
+    else:
+        s = torch.as_tensor(scores, dtype=torch.float32)
+
+    if s.numel() == 0 or len(tokens) == 0:
+        return Image.new("RGBA", (width, height), (255, 255, 255, 0))
+
+    # normalize scores for colormap, consistent with zennit.image.imgify
+    s_np = s.numpy()
+    # for 1D scores, normalize over the single axis (0,)
+    vmin_arr, vmax_arr = interval_norm_bounds(s_np, symmetric=symmetric, dim=(0,))
+
+    if vmin is not None:
+        vmin_arr = np.array(vmin)
+    if vmax is not None:
+        vmax_arr = np.array(vmax)
+
+    denom = (vmax_arr - vmin_arr)
+    denom[denom == 0] = 1e-6
+    s_norm_np = (s_np - vmin_arr) / denom
+    s_norm_np = np.clip(s_norm_np, 0.0, 1.0)
+    s_norm = torch.from_numpy(s_norm_np).float()
+
+    cmap_fn = plt.get_cmap(cmap)
+
+    img = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    try:
+        # Try to get a slightly larger, more readable font if available
+        font = ImageFont.truetype("DejaVuSans.ttf", font_size)
+    except Exception:
+        try:
+            font = ImageFont.load_default()
+        except Exception:
+            font = None
+
+    n_tok = len(tokens)
+    tok_width = max(1, width // n_tok)
+
+    for i, tok in enumerate(tokens):
+        x0 = i * tok_width
+        x1 = (i + 1) * tok_width if i < n_tok - 1 else width
+
+        v = float(s_norm[i].clamp(0.0, 1.0))
+        r, g, b, a = cmap_fn(v)
+        color = (int(r * 255), int(g * 255), int(b * 255), int(a * 255))
+
+        draw.rectangle([x0, 0, x1, height], fill=color)
+
+        if font is not None and tok:
+            # Compute text size using the drawing context so we can center it
+            try:
+                # Newer Pillow
+                bbox = draw.textbbox((0, 0), tok, font=font)
+                tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            except Exception:
+                try:
+                    # Fallback to font-based methods
+                    bbox = font.getbbox(tok)
+                    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                except Exception:
+                    try:
+                        tw, th = font.getsize(tok)
+                    except Exception:
+                        tw, th = x1 - x0, height
+
+            tx = x0 + max(0, (x1 - x0 - tw) // 2)
+            ty = max(0, (height - th) // 2)
+            text_color = (0, 0, 0, 255)
+            draw.text((tx, ty), tok, font=font, fill=text_color)
+
+    return img
+
+
+def img_txt_grid(
+        img_heatmaps: Union[torch.Tensor, np.ndarray],
+        txt_heatmaps: Union[torch.Tensor, np.ndarray],
+        txt_tokens: Union[List[str], List[List[str]]],
+        *,
+        cmap: str = "bwr",
+        vmin=None,
+        vmax=None,
+        symmetric: bool = True,
+        grid: Tuple[int, int] = None,
+        resize: int = None,
+        padding: bool = False,
+        text_height: int = 48,
+        text_font_size: int = 20,
+) -> Image.Image:
+    """
+    Create a grid where each cell contains an image heatmap on top and a
+    corresponding text heatmap strip below.
+
+    Parameters
+    ----------
+    img_heatmaps: torch.Tensor or np.ndarray
+        Shape [B, H, W] (or compatible with imgify per image).
+    txt_heatmaps: torch.Tensor or np.ndarray
+        Shape [B, T] with token scores.
+    txt_tokens: list of str or list of list of str
+        Tokens per sample. If a flat list is passed, it is reused for all
+        samples.
+    grid: (rows, cols) or None
+        Grid layout for stacked pairs. If None, a roughly square grid is used.
+    REMAINING PARAMETERS
+        Correspond to crp.image.imgify / zennit.imgify where applicable.
+    """
+
+    if isinstance(img_heatmaps, torch.Tensor):
+        img_hm = img_heatmaps
+    else:
+        img_hm = torch.as_tensor(img_heatmaps)
+
+    if isinstance(txt_heatmaps, torch.Tensor):
+        txt_hm = txt_heatmaps
+    else:
+        txt_hm = torch.as_tensor(txt_heatmaps)
+
+    b_img = img_hm.shape[0]
+    b_txt = txt_hm.shape[0]
+    if b_img != b_txt:
+        raise ValueError("img_heatmaps and txt_heatmaps must have the same batch size.")
+
+    # normalize tokens format
+    if txt_tokens and isinstance(txt_tokens[0], str):
+        tokens_per_sample: List[List[str]] = [list(txt_tokens) for _ in range(b_img)]
+    else:
+        tokens_per_sample = txt_tokens  # type: ignore[assignment]
+
+    if len(tokens_per_sample) != b_img:
+        raise ValueError("txt_tokens must have one list of tokens per sample or a single shared list.")
+
+    stacked_images: List[Image.Image] = []
+
+    for i in range(b_img):
+        img = imgify(
+            img_hm[i],
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            symmetric=symmetric,
+            resize=resize,
+            padding=padding,
+        )
+
+        txt_strip = _render_text_strip(
+            tokens_per_sample[i],
+            txt_hm[i],
+            width=img.size[0],
+            height=text_height,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            symmetric=symmetric,
+            font_size=text_font_size,
+        )
+
+        w = img.size[0]
+        h = img.size[1] + txt_strip.size[1]
+        stacked = Image.new("RGBA", (w, h), (255, 255, 255, 255))
+        stacked.paste(img, (0, 0))
+        stacked.paste(txt_strip, (0, img.size[1]))
+        stacked_images.append(stacked)
+
+    if not stacked_images:
+        return Image.new("RGBA", (1, 1), (255, 255, 255, 0))
+
+    # determine grid
+    n = len(stacked_images)
+    if grid is not None:
+        rows, cols = grid
+    else:
+        cols = int(np.ceil(np.sqrt(n)))
+        rows = int(np.ceil(n / cols))
+
+    cell_w = max(im.size[0] for im in stacked_images)
+    cell_h = max(im.size[1] for im in stacked_images)
+
+    grid_img = Image.new("RGBA", (cols * cell_w, rows * cell_h), (255, 255, 255, 255))
+
+    for idx, im in enumerate(stacked_images):
+        r = idx // cols
+        c = idx % cols
+        x = c * cell_w
+        y = r * cell_h
+        grid_img.paste(im, (x, y))
+
+    return grid_img
 
 
 def plot_grid(ref_c: Dict[int, Any], cmap_dim=1, cmap="bwr", vmin=None, vmax=None, symmetric=True, resize=None, padding=True, figsize=(6, 6)):
