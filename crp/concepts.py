@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from typing import List, Dict
+from sklearn.decomposition import FastICA
 
 
 class Concept:
@@ -199,8 +200,6 @@ class TransformerChannelConcept(Concept):
 
         def mask_fct_rf(grad):
 
-            grad_shape = grad.shape
-
             mask = torch.zeros_like(grad[batch_id])
 
             for concept_id in concept_ids:
@@ -290,5 +289,136 @@ class TransformerChannelConcept(Concept):
         d_ch_sorted = torch.argsort(rel_l, dim=0, descending=True)
         rel_ch_sorted = torch.gather(rel_l, dim=0, index=d_ch_sorted)
         rf_ch_sorted = torch.gather(rf_neuron, dim=0, index=d_ch_sorted)
+
+        return d_ch_sorted, rel_ch_sorted, rf_ch_sorted
+
+
+class ICAConcept(Concept):
+    """
+    Independent Component Analysis Concept Class for torch.nn.Linear transformer layers
+    """
+
+    def __init__(self, n_concepts: int, random_state: int = 42, device: str = "cuda"):
+        self.n_concepts = n_concepts
+        self.random_state = random_state
+        self.concept_directions = {}
+        self.components = {}
+        self.mean = {}
+        self.mixing = {}
+        self.ica = FastICA(n_components=n_concepts, random_state=random_state)
+        self.device = device
+
+    def fit(self, layer_name: str, relevance_or_activation: torch.Tensor):
+        self.ica.fit(relevance_or_activation)
+        # normed concept directions
+        self.concept_directions[layer_name] = torch.tensor(self.ica.components_ / np.linalg.norm(self.ica.components_, axis=-1, keepdims=True), device=self.device)
+        self.components[layer_name] = torch.tensor(self.ica.components_, device=self.device).T
+        self.mean[layer_name] = torch.tensor(self.ica.mean_, device=self.device)
+        self.mixing[layer_name] = torch.tensor(self.ica.mixing_, device=self.device).T
+
+    def _encode(self, layer_name, x):
+        self._assert_fit(layer_name)
+        return (x - self.mean[layer_name]) @ self.components[layer_name]
+
+    def _decode(self, layer_name, z):
+        self._assert_fit(layer_name)
+        return (z @ self.mixing[layer_name]) + self.mean[layer_name]
+
+    def _assert_fit(self, layer_name):
+        if not layer_name in self.concept_directions:
+            raise ValueError(f"Concept not yet fit to layer {layer_name} activations")
+
+    def mask(self, batch_id: int, concept_ids: List, layer_name=None, additional_forward_kwargs=None, rf=False):
+        """
+        Wrapper that generates a function that modifies the gradient (replaced by zennit by attributions).
+
+        Parameters:
+        ----------
+        batch_id: int
+            Specifies the batch dimension in the torch.Tensor.
+        concept_ids: list of integer values
+            integer lists corresponding to neuron indices.
+
+        Returns:
+        --------
+        callable function that modifies the gradient
+        """
+
+        def mask_fct(grad):
+            # Use the concept directions as channel mask (i.e. across all token embeddings)
+            # concept_mask = torch.sum([self.concept_directions[layer_name][concept_id] for concept_id in concept_ids], dim=0)
+            # grad[batch_id] = grad[batch_id] * concept_mask.unsqueeze(0)
+
+            concept_space = self._encode(layer_name, grad[batch_id])
+            mask = torch.zeros_like(concept_space)
+            mask[..., concept_ids] = 1
+            concept_space = concept_space * mask
+            grad[batch_id] = self._decode(layer_name, concept_space)
+
+            return grad
+
+        def mask_fct_rf(grad):
+
+            concept_space = self._encode(layer_name, grad[batch_id])
+            mask = torch.zeros_like(concept_space)
+
+            for concept_id in concept_ids:
+                mask[..., torch.argmax(torch.abs(concept_space[..., concept_id])), concept_id] = 1
+
+            concept_space = concept_space * mask
+            grad[batch_id] = self._decode(layer_name, concept_space)
+            
+            return grad
+
+        if rf:
+            return mask_fct_rf
+        return mask_fct
+            
+    def attribute(self, relevance, mask=None, layer_name: str = None, abs_norm=True):
+
+        if isinstance(mask, torch.Tensor):
+            relevance = relevance * mask
+
+        rel_l = self._encode(layer_name, relevance).sum(dim=-2)
+
+        if abs_norm:
+            rel_l = rel_l / (torch.abs(rel_l).sum(-1).view(-1, 1) + 1e-10)
+
+        return rel_l
+
+    def reference_sampling(self, relevance_or_activation, layer_name: str = None, max_target: str = "sum", abs_norm=True, additional_forward_kwargs=None):
+        """
+        Samples the most relevant/activated concepts for each sample in the batch. 
+        Total channel relevance/activation can be defined as the sum or the maximum of the relevances/activations of all neurons in the channel.
+
+        Parameters:
+            relevance_or_activation: tensor [batch, tokens, embed_dim/channels]
+            max_target: str. Either 'sum' or 'max'.
+            abs_norm: bool. Whether the relevance/activations are normalized
+        """
+        
+        concept_relevance_or_activation = self._encode(layer_name, relevance_or_activation)
+
+        # position of receptive field neuron per concept channel
+        rf_neurons = torch.argmax(concept_relevance_or_activation, dim=-2)
+        
+        # channel maximization target --> sum neurons in channel across tokens
+        if max_target == "sum":
+            rel_l = torch.sum(concept_relevance_or_activation, dim=-2)
+
+        # if choosing only max target pick max neuron in channel across tokens
+        elif max_target == "max":
+            rel_l = torch.amax(concept_relevance_or_activation, dim=-2)
+
+        else:
+            raise ValueError("'max_target' supports only 'max' or 'sum'.")
+        
+        if abs_norm:
+            rel_l = rel_l / (torch.abs(rel_l).sum(-1, keepdim=True) + 1e-10)
+
+        # sort in dataset index order
+        d_ch_sorted = torch.argsort(rel_l, dim=0, descending=True)
+        rel_ch_sorted = torch.gather(rel_l, dim=0, index=d_ch_sorted)
+        rf_ch_sorted = torch.gather(rf_neurons, dim=0, index=d_ch_sorted)
 
         return d_ch_sorted, rel_ch_sorted, rf_ch_sorted
