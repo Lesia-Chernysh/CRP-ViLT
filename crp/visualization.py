@@ -128,7 +128,7 @@ class ViLTFeatureVisualization:
 
     def get_data_concurrently(self, indices: Union[List, np.ndarray, torch.tensor]):
         
-        images, questions, answers = zip(*[self.dataset[i] for i in indices])
+        _qids, images, questions, answers = zip(*[self.dataset[i] for i in indices])
         
         inputs = self.processor(images=images, text=questions, return_tensors="pt", padding=True, truncation=True)
         targets = [[self.attribution.model.hf_model.config.label2id[label] for label in labels if label in self.attribution.model.hf_model.config.label2id] for labels in answers]
