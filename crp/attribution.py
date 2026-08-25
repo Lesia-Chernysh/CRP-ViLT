@@ -309,6 +309,7 @@ class CondAttribution:
         exclude_parallel: boolean
             If set, all layer names in 'conditions' must be identical. This limitation does not apply to the __call__ method.
         """
+        print(f"record layer: {record_layer}")
 
         if not isinstance(inputs, tuple):
             inputs = (inputs,)
@@ -502,6 +503,8 @@ class CondAttribution:
 
         if start_layer is not None and start_layer not in record_l_names:
             record_l_names.append(start_layer)
+
+        print(f"record_l_names: {record_l_names}")
 
         for name, layer in self.model.named_modules():
 
