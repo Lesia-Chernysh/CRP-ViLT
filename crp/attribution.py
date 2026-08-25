@@ -50,8 +50,7 @@ class CondAttribution:
             wrt_tensor, grad_tensors = pred, grad_mask.to(pred)
 
             for l_name in layer_names:
-                print(f"current layer {l_name}")
-
+                
                 inputs = layer_out[l_name]
 
                 try:
@@ -318,8 +317,8 @@ class CondAttribution:
 
         hook_map, y_targets, cond_l_names = {}, [], []
         for i, cond in enumerate(conditions):
-            print("cond", cond)
             for l_name, indices in cond.items():
+                print(f"current layer: {l_name}")
                 if l_name == self.MODEL_OUTPUT_NAME:
                     y_targets.append(indices)
                 else:
