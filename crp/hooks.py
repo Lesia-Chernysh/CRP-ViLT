@@ -73,6 +73,10 @@ class FeatVisHook:
         '''Register a backward-hook to the resulting tensor right after the forward.'''
 
         s_indices, targets, additional_forward_kwargs = self.dict_inputs["sample_indices"], self.dict_inputs["targets"], self.dict_inputs["additional_forward_kwargs"]
+        
+        if isinstance(output, tuple):
+          output = output[0]
+
         activation = output.detach().to(self.on_device) if self.on_device else output.detach()
         self.FV.analyze_activation(activation, self.layer_name, self.concept, s_indices, targets, additional_forward_kwargs)
 
