@@ -335,7 +335,6 @@ class CondAttribution:
 
         if composite is None:
             composite = Composite()
-        print(f"composite {Composite}")
         with mask_composite.context(self.model), composite.context(self.model) as modified:
 
             torch.manual_seed(self.seed)
@@ -354,6 +353,7 @@ class CondAttribution:
                 grad_mask = self.relevance_init(pred.detach().clone(), y_targets, init_rel)
                 self.backward(pred, grad_mask, exclude_parallel, cond_l_names, layer_out)
 
+            print(f"pred: {pred}")
             attribution = self.heatmap_modifier(inputs, on_device)
             activations, relevances = {}, {}
             if len(layer_out) > 0:
