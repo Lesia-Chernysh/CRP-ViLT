@@ -114,9 +114,9 @@ class CondAttribution:
         return output_selection
 
     def heatmap_modifier(self, inputs, on_device=None):
-        print(f"inputs: {inputs}")
+        #print(f"inputs: {inputs}")
         heatmap = tuple(i.grad.detach() if i.grad is not None else torch.zeros_like(i) for i in inputs)
-        print(f"heatmap: {heatmap}")
+        #print(f"heatmap: {heatmap}")
         heatmap = tuple(h.to(on_device) if on_device else h for h in heatmap)
         return heatmap
 
@@ -319,7 +319,6 @@ class CondAttribution:
         hook_map, y_targets, cond_l_names = {}, [], []
         for i, cond in enumerate(conditions):
             for l_name, indices in cond.items():
-                print(f"current layer: {l_name}")
                 if l_name == self.MODEL_OUTPUT_NAME:
                     y_targets.append(indices)
                 else:
@@ -354,9 +353,11 @@ class CondAttribution:
                 grad_mask = self.relevance_init(pred.detach().clone(), y_targets, init_rel)
                 self.backward(pred, grad_mask, exclude_parallel, cond_l_names, layer_out)
 
-            print(f"pred: {pred}")
+            #print(f"pred: {pred}")
             attribution = self.heatmap_modifier(inputs, on_device)
             activations, relevances = {}, {}
+            
+            print("len out", len(layer_out))
             if len(layer_out) > 0:
                 activations, relevances = self._collect_hook_activation_relevance(layer_out, on_device)
             [h.remove() for h in handles]
