@@ -46,6 +46,18 @@ class Maximization:
             rel, layer_name, self.max_target, self.abs_norm, additional_forward_kwargs)
         # convert batch index to dataset wide index
         data_indices = torch.from_numpy(data_indices).to(b_c_sorted)
+
+        print("b_c_sorted:", b_c_sorted)
+        print("b_c_sorted shape:", b_c_sorted.shape)
+        print("b_c_sorted dtype:", b_c_sorted.dtype)
+        print("b_c_sorted min/max:",
+              b_c_sorted.min().item(),
+              b_c_sorted.max().item())
+
+        print("data_indices shape:", data_indices.shape)
+        print("targets len:", len(targets))
+        print("targets:", targets) 
+
         d_c_sorted = torch.take(data_indices, b_c_sorted)
         # sort targets
         targets = torch.Tensor(targets).to(b_c_sorted)
