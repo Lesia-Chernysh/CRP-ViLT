@@ -50,6 +50,7 @@ class CondAttribution:
             wrt_tensor, grad_tensors = pred, grad_mask.to(pred)
 
             for l_name in layer_names:
+                print(f"current layer {l_name}")
 
                 inputs = layer_out[l_name]
 
@@ -242,7 +243,6 @@ class CondAttribution:
             'prediction': torch.Tensor
                 The model prediction output. If 'start_layer' is set, 'prediction' is the layer activation.       
         """
-        
         if exclude_parallel:
             return self._conditions_wrapper(inputs, conditions, composite, record_layer, mask_map, start_layer, init_rel, on_device, True, additional_forward_kwargs, rf)
         else:
@@ -279,7 +279,7 @@ class CondAttribution:
             else:
                 heatmap = tuple(torch.cat([h1, h2], dim=0) for h1, h2 in zip(heatmap, attr.heatmap))
                 prediction = torch.cat([prediction, attr.prediction], dim=0)
-
+        print(f"heatmap: {heatmap}\n")
         return attrResult(heatmap, activations, relevances, prediction)
 
     def _separate_conditions(self, conditions):
@@ -318,6 +318,7 @@ class CondAttribution:
 
         hook_map, y_targets, cond_l_names = {}, [], []
         for i, cond in enumerate(conditions):
+            print("cond", cond)
             for l_name, indices in cond.items():
                 if l_name == self.MODEL_OUTPUT_NAME:
                     y_targets.append(indices)
@@ -335,7 +336,7 @@ class CondAttribution:
 
         if composite is None:
             composite = Composite()
-
+        print(f"composite {Composite}")
         with mask_composite.context(self.model), composite.context(self.model) as modified:
 
             torch.manual_seed(self.seed)
@@ -360,6 +361,7 @@ class CondAttribution:
                 activations, relevances = self._collect_hook_activation_relevance(layer_out, on_device)
             [h.remove() for h in handles]
 
+        print(f"act: {activations}\nrel: {relevances}\npred: {pred}\n")
         return attrResult(attribution, activations, relevances, pred)
 
     def generate(
