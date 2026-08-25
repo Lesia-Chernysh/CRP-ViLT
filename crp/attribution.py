@@ -114,8 +114,9 @@ class CondAttribution:
         return output_selection
 
     def heatmap_modifier(self, inputs, on_device=None):
-
+        print(f"inputs: {inputs}")
         heatmap = tuple(i.grad.detach() if i.grad is not None else torch.zeros_like(i) for i in inputs)
+        print(f"heatmap: {heatmap}")
         heatmap = tuple(h.to(on_device) if on_device else h for h in heatmap)
         return heatmap
 
