@@ -498,7 +498,7 @@ class ViLTFeatureVisualization:
         for l_name in layer_c_ind:
 
             c_indices = layer_c_ind[l_name]
-            print("Layer:", l_name)
+            #print("Layer:", l_name)
             pbar = tqdm(total=len(c_indices), dynamic_ncols=True)
 
             for c_id in c_indices:
@@ -528,7 +528,6 @@ class PredictionFeatureVisualization(
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
-        print("NEW")
 
         self.predicted_targets = torch.as_tensor(
             predicted_targets,
