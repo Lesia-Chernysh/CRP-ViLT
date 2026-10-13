@@ -546,7 +546,6 @@ class PredictionFeatureVisualization(
     def get_data_concurrently(
         self,
         indices,
-        preprocessing=True,
     ):
         # Let the original implementation load images.
         data, _ = super().get_data_concurrently(
