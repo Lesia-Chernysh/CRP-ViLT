@@ -518,4 +518,50 @@ class ViLTFeatureVisualization:
 
             pbar.close()
 
-       
+class PredictionFeatureVisualization(
+    ViLTFeatureVisualization
+):
+    def __init__(
+        self,
+        *args,
+        predicted_targets,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        print("NEW")
+
+        self.predicted_targets = torch.as_tensor(
+            predicted_targets,
+            dtype=torch.long,
+        ).cpu()
+
+        if len(self.predicted_targets) != len(self.dataset):
+            raise ValueError(
+                "Number of predictions does not match "
+                "the dataset length: "
+                f"{len(self.predicted_targets)} versus "
+                f"{len(self.dataset)}."
+            )
+
+    def get_data_concurrently(
+        self,
+        indices,
+        preprocessing=True,
+    ):
+        # Let the original implementation load images.
+        data, question, _ = super().get_data_concurrently(
+            indices,
+            preprocessing=preprocessing,
+        )
+
+        indices_array = np.asarray(
+            indices,
+            dtype=np.int64,
+        ).reshape(-1)
+
+        targets = (
+            self.predicted_targets[indices_array]
+            .numpy()
+        )
+
+        return data, question, targets       
