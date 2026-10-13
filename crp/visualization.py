@@ -549,8 +549,7 @@ class PredictionFeatureVisualization(
     ):
         # Let the original implementation load images.
         data, _ = super().get_data_concurrently(
-            indices,
-            preprocessing=preprocessing,
+            indices
         )
 
         indices_array = np.asarray(
