@@ -549,7 +549,7 @@ class PredictionFeatureVisualization(
         preprocessing=True,
     ):
         # Let the original implementation load images.
-        data, question, _ = super().get_data_concurrently(
+        data, _ = super().get_data_concurrently(
             indices,
             preprocessing=preprocessing,
         )
@@ -564,4 +564,4 @@ class PredictionFeatureVisualization(
             .numpy()
         )
 
-        return data, question, targets       
+        return data, targets       
