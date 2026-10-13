@@ -279,7 +279,7 @@ class CondAttribution:
             else:
                 heatmap = tuple(torch.cat([h1, h2], dim=0) for h1, h2 in zip(heatmap, attr.heatmap))
                 prediction = torch.cat([prediction, attr.prediction], dim=0)
-        print(f"heatmap: {heatmap}\n")
+        #print(f"heatmap: {heatmap}\n")
         return attrResult(heatmap, activations, relevances, prediction)
 
     def _separate_conditions(self, conditions):
@@ -309,7 +309,7 @@ class CondAttribution:
         exclude_parallel: boolean
             If set, all layer names in 'conditions' must be identical. This limitation does not apply to the __call__ method.
         """
-        print(f"record layer: {record_layer}")
+        #print(f"record layer: {record_layer}")
 
         if not isinstance(inputs, tuple):
             inputs = (inputs,)
@@ -358,12 +358,12 @@ class CondAttribution:
             attribution = self.heatmap_modifier(inputs, on_device)
             activations, relevances = {}, {}
             
-            print("len out", len(layer_out))
+            #print("len out", len(layer_out))
             if len(layer_out) > 0:
                 activations, relevances = self._collect_hook_activation_relevance(layer_out, on_device)
             [h.remove() for h in handles]
 
-        print(f"act: {activations}\nrel: {relevances}\npred: {pred}\n")
+        #print(f"act: {activations}\nrel: {relevances}\npred: {pred}\n")
         return attrResult(attribution, activations, relevances, pred)
 
     def generate(
@@ -504,7 +504,7 @@ class CondAttribution:
         if start_layer is not None and start_layer not in record_l_names:
             record_l_names.append(start_layer)
 
-        print(f"record_l_names: {record_l_names}")
+        #print(f"record_l_names: {record_l_names}")
 
         for name, layer in self.model.named_modules():
 
