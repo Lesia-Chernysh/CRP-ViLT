@@ -126,7 +126,7 @@ class ViLTFeatureVisualization:
         return self.saved_checkpoints
 
 
-    def convert_answers_to_targets(answers, label2id):
+    def convert_answers_to_targets(self, answers, label2id):
         targets = []
     
         for sample_answers in answers:
@@ -155,7 +155,7 @@ class ViLTFeatureVisualization:
         images, questions, answers = zip(*[self.dataset[i] for i in indices])
         print("answers:", answers)
         inputs = self.processor(images=images, text=questions, return_tensors="pt", padding=True, truncation=True)
-        targets = convert_answers_to_targets(
+        targets = self.convert_answers_to_targets(
             answers,
             self.attribution.model.hf_model.config.label2id,
         )
