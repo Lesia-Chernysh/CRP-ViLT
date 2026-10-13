@@ -126,12 +126,40 @@ class ViLTFeatureVisualization:
         return self.saved_checkpoints
 
 
+    def convert_answers_to_targets(answers, label2id):
+        targets = []
+    
+        for sample_answers in answers:
+            if torch.is_tensor(sample_answers):
+                if sample_answers.ndim == 0:
+                    sample_answers = sample_answers.item()
+                else:
+                    sample_answers = sample_answers.tolist()
+    
+            if isinstance(sample_answers, (str, int, np.integer)):
+                sample_answers = [sample_answers]
+    
+            sample_targets = []
+    
+            for answer in sample_answers:
+                if isinstance(answer, (int, np.integer)):
+                    sample_targets.append(int(answer))
+                elif answer in label2id:
+                    sample_targets.append(label2id[answer])
+    
+            targets.append(sample_targets)
+    
+        return targets
     def get_data_concurrently(self, indices: Union[List, np.ndarray, torch.tensor]):
         
         images, questions, answers = zip(*[self.dataset[i] for i in indices])
         print("answers:", answers)
         inputs = self.processor(images=images, text=questions, return_tensors="pt", padding=True, truncation=True)
-        targets = [[self.attribution.model.hf_model.config.label2id[label] for label in labels if label in self.attribution.model.hf_model.config.label2id] for labels in answers]
+        targets = convert_answers_to_targets(
+            answers,
+            self.attribution.model.hf_model.config.label2id,
+        )
+        #targets = [[self.attribution.model.hf_model.config.label2id[label] for label in labels if label in self.attribution.model.hf_model.config.label2id] for labels in answers]
     
         inputs.to(self.attribution.model.hf_model.device)
         inputs["input_embeds"] = self.attribution.model.hf_model.get_input_embeddings()(inputs.input_ids).detach().requires_grad_(True)
