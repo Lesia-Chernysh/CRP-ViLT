@@ -153,7 +153,7 @@ class ViLTFeatureVisualization:
     def get_data_concurrently(self, indices: Union[List, np.ndarray, torch.tensor]):
         
         images, questions, answers = zip(*[self.dataset[i] for i in indices])
-        print("answers:", answers)
+        #print("answers:", answers)
         inputs = self.processor(images=images, text=questions, return_tensors="pt", padding=True, truncation=True)
         targets = self.convert_answers_to_targets(
             answers,
