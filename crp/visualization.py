@@ -405,7 +405,7 @@ class ViLTFeatureVisualization:
 
     def _load_ref_and_attribution(self, d_indices, c_id, n_indices, layer_name, attribute, rf, plot_fn, batch_size):
 
-        print("_load_ref_and_attribution, d_indices:", d_indices)
+        #print("_load_ref_and_attribution, d_indices:", d_indices)
         inputs, _ = self.get_data_concurrently(d_indices)
 
         if attribute:
@@ -576,7 +576,7 @@ class PredictionFeatureVisualization(
         indices,
     ):
         # Let the original implementation load images.
-        print("get_data_concurrently, indices:", indices)
+        #print("get_data_concurrently, indices:", indices)
         data, _ = super().get_data_concurrently(
             indices
         )
